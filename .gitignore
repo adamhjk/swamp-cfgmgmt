@@ -1,0 +1,12 @@
+# Swamp runtime and generated data
+.swamp/
+.swamp.yaml
+
+# Swamp model instances, workflows, vaults (testing/development)
+/models/
+/workflows/
+/vaults/
+/status/
+
+# Claude Code
+.claude/

@@ -1,0 +1,20 @@
+{
+  "tasks": {
+    "fmt": "deno fmt",
+    "fmt:check": "deno fmt --check",
+    "lint": "deno lint",
+    "test": "deno test --allow-run --allow-read --allow-write --allow-env"
+  },
+  "fmt": {
+    "include": ["extensions/", "tests/"]
+  },
+  "lint": {
+    "include": ["extensions/", "tests/"],
+    "rules": {
+      "exclude": ["no-import-prefix"]
+    }
+  },
+  "test": {
+    "include": ["tests/"]
+  }
+}

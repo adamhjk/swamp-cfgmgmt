@@ -1,0 +1,98 @@
+manifestVersion: 1
+name: "@adam/cfgmgmt"
+version: "2026.03.04.2"
+description: |
+  SSH-based configuration management for Linux and macOS.
+
+  Manage remote systems over SSH using the check/apply pattern — every model
+  is idempotent and reports whether resources are compliant, non-compliant,
+  applied, or failed. Convergence failures propagate as step failures so
+  workflow orchestration can detect and react to errors.
+
+  Includes 33 model types:
+  - **@adam/cfgmgmt/node** — Gather system facts (OS, arch, package managers)
+  - **@adam/cfgmgmt/file** — Create, update, or remove files
+  - **@adam/cfgmgmt/template** — Render EJS templates and deploy to remote hosts.
+    Uses `<%= var %>` for plain string interpolation (HTML escaping is disabled).
+    Whitespace control: `-%>` strips the trailing newline (use on loop/conditional
+    lines to avoid blank lines in output), `<%_ %>` strips leading whitespace,
+    `_%>` strips all trailing whitespace.
+  - **@adam/cfgmgmt/directory** — Create or remove directories
+  - **@adam/cfgmgmt/link** — Manage symbolic links
+  - **@adam/cfgmgmt/line** — Edit individual lines in files using regex matching
+  - **@adam/cfgmgmt/exec** — Run commands with onlyIf/notIf guards
+  - **@adam/cfgmgmt/systemd** — Manage systemd services and unit files
+  - **@adam/cfgmgmt/dnf** — Manage packages on Fedora/RHEL (with version pinning)
+  - **@adam/cfgmgmt/apt** — Manage packages on Debian/Ubuntu (with version pinning)
+  - **@adam/cfgmgmt/pacman** — Manage packages on Arch Linux
+  - **@adam/cfgmgmt/homebrew** — Manage packages on macOS
+  - **@adam/cfgmgmt/apt_repository** — Manage apt sources and GPG keys
+  - **@adam/cfgmgmt/dnf_repository** — Manage dnf/yum repository files
+  - **@adam/cfgmgmt/hostname** — Set system hostname
+  - **@adam/cfgmgmt/timezone** — Set system timezone
+  - **@adam/cfgmgmt/user** — Manage system users
+  - **@adam/cfgmgmt/group** — Manage system groups
+  - **@adam/cfgmgmt/authorized_key** — Manage SSH authorized keys
+  - **@adam/cfgmgmt/host_entry** — Manage /etc/hosts entries
+  - **@adam/cfgmgmt/sysctl** — Manage kernel parameters
+  - **@adam/cfgmgmt/kernel_module** — Load/unload kernel modules with persistence
+  - **@adam/cfgmgmt/cron** — Manage cron jobs
+  - **@adam/cfgmgmt/mount** — Manage filesystem mounts and fstab
+  - **@adam/cfgmgmt/firewall** — Manage firewall rules (ufw/firewalld/iptables)
+  - **@adam/cfgmgmt/selinux** — Manage SELinux mode and booleans
+  - **@adam/cfgmgmt/docker_image** — Manage Docker images
+  - **@adam/cfgmgmt/docker_container** — Manage Docker containers
+  - **@adam/cfgmgmt/git** — Manage git repository checkouts
+  - **@adam/cfgmgmt/archive** — Extract archives idempotently
+  - **@adam/cfgmgmt/fetch** — Download files from URLs with checksum verification
+  - **@adam/cfgmgmt/reboot** — Reboot hosts and wait for SSH reconnection
+  - **@adam/cfgmgmt/certificate** — Deploy SSL/TLS certificates with validation
+
+  Every model is a factory across hosts — a single definition can target
+  multiple hosts via workflow forEach, with per-host data stored separately.
+
+  Connections are multiplexed via OpenSSH ControlMaster sockets. All models
+  (except node and homebrew) support sudo privilege escalation.
+labels:
+  - cfgmgmt
+  - ssh
+  - linux
+  - macos
+  - fedora
+  - debian
+  - ubuntu
+  - archlinux
+models:
+  - adam/cfgmgmt/node.ts
+  - adam/cfgmgmt/file.ts
+  - adam/cfgmgmt/template.ts
+  - adam/cfgmgmt/directory.ts
+  - adam/cfgmgmt/link.ts
+  - adam/cfgmgmt/exec.ts
+  - adam/cfgmgmt/systemd.ts
+  - adam/cfgmgmt/dnf.ts
+  - adam/cfgmgmt/apt.ts
+  - adam/cfgmgmt/pacman.ts
+  - adam/cfgmgmt/homebrew.ts
+  - adam/cfgmgmt/hostname.ts
+  - adam/cfgmgmt/timezone.ts
+  - adam/cfgmgmt/user.ts
+  - adam/cfgmgmt/group.ts
+  - adam/cfgmgmt/authorized_key.ts
+  - adam/cfgmgmt/host_entry.ts
+  - adam/cfgmgmt/sysctl.ts
+  - adam/cfgmgmt/cron.ts
+  - adam/cfgmgmt/mount.ts
+  - adam/cfgmgmt/firewall.ts
+  - adam/cfgmgmt/selinux.ts
+  - adam/cfgmgmt/docker_image.ts
+  - adam/cfgmgmt/docker_container.ts
+  - adam/cfgmgmt/git.ts
+  - adam/cfgmgmt/archive.ts
+  - adam/cfgmgmt/line.ts
+  - adam/cfgmgmt/fetch.ts
+  - adam/cfgmgmt/apt_repository.ts
+  - adam/cfgmgmt/dnf_repository.ts
+  - adam/cfgmgmt/kernel_module.ts
+  - adam/cfgmgmt/reboot.ts
+  - adam/cfgmgmt/certificate.ts
