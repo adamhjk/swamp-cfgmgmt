@@ -239,7 +239,7 @@ async function deployFile(client, path, content, mode, g) {
 
 export const model = {
   type: "@adam/cfgmgmt/certificate",
-  version: "2026.03.04.1",
+  version: "2026.03.18.1",
   globalArguments: GlobalArgsSchema,
   inputsSchema: z.object({
     nodeHost: z.string().optional().describe(
@@ -399,4 +399,5 @@ export const model = {
       },
     },
   },
+  reports: [],
 };

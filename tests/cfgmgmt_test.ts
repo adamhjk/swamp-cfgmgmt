@@ -94,8 +94,8 @@ async function runMethod(
     method,
     "--json",
   );
-  const data = result.data as Record<string, unknown>;
-  return data.attributes as Record<string, unknown>;
+  const artifacts = result.dataArtifacts as Array<Record<string, unknown>>;
+  return artifacts[0].attributes as Record<string, unknown>;
 }
 
 async function createAndEdit(

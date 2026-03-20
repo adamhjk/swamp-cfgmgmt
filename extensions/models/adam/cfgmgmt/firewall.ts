@@ -194,7 +194,7 @@ function emptyCurrent() {
 
 export const model = {
   type: "@adam/cfgmgmt/firewall",
-  version: "2026.03.03.1",
+  version: "2026.03.18.1",
   globalArguments: GlobalArgsSchema,
   inputsSchema: z.object({
     nodeHost: z.string().optional().describe(
@@ -398,4 +398,5 @@ export const model = {
       },
     },
   },
+  reports: [],
 };

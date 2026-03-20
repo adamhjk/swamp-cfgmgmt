@@ -90,7 +90,7 @@ function detectChanges(packages, ensure) {
 
 export const model = {
   type: "@adam/cfgmgmt/homebrew",
-  version: "2026.03.02.1",
+  version: "2026.03.18.1",
   globalArguments: GlobalArgsSchema,
   inputsSchema: z.object({
     packages: z.array(z.string()).optional().describe(
@@ -393,4 +393,5 @@ export const model = {
       },
     },
   },
+  reports: [],
 };

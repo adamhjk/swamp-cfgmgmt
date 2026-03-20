@@ -1,0 +1,27 @@
+{
+  "@swamp/aws/ecs": {
+    "version": "2026.03.25.1",
+    "pulledAt": "2026-03-26T18:46:34.668Z",
+    "files": [
+      "extensions/models/primary_task_set.ts",
+      "extensions/models/task_definition.ts",
+      "extensions/models/_lib/aws.ts",
+      "extensions/models/task_set.ts",
+      "extensions/models/cluster.ts",
+      "extensions/models/capacity_provider.ts",
+      "extensions/models/cluster_capacity_provider_associations.ts",
+      "extensions/models/service.ts",
+      "extensions/models/express_gateway_service.ts",
+      ".swamp/bundles/express_gateway_service.js",
+      ".swamp/bundles/primary_task_set.js",
+      ".swamp/bundles/task_definition.js",
+      ".swamp/bundles/cluster_capacity_provider_associations.js",
+      ".swamp/bundles/service.js",
+      ".swamp/bundles/task_set.js",
+      ".swamp/bundles/cluster.js",
+      ".swamp/bundles/capacity_provider.js",
+      "extensions/models/LICENSE.txt",
+      "extensions/models/README.md"
+    ]
+  }
+}

@@ -1,0 +1,344 @@
+// Auto-generated extension model for @swamp/aws/ecs/cluster
+// Do not edit manually. Re-generate with: deno task generate:aws
+
+// deno-lint-ignore-file no-explicit-any
+
+import { z } from "zod";
+import {
+  createResource,
+  deleteResource,
+  isResourceNotFoundError,
+  readResource,
+  updateResource,
+} from "./_lib/aws.ts";
+
+export const ClusterSettingsSchema = z.object({
+  Value: z.string().describe(
+    "The value to set for the cluster setting. The supported values are enhanced, enabled, and disabled. To use Container Insights with enhanced observability, set the containerInsights account setting to enhanced. To use Container Insights, set the containerInsights account setting to enabled. If a cluster value is specified, it will override the containerInsights value set with [PutAccountSetting](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_PutAccountSetting.html) or [PutAccountSettingDefault](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_PutAccountSettingDefault.html).",
+  ).optional(),
+  Name: z.string().describe(
+    "The name of the cluster setting. The value is containerInsights.",
+  ).optional(),
+});
+
+export const CapacityProviderStrategyItemSchema = z.object({
+  CapacityProvider: z.string().describe(
+    "The short name of the capacity provider. This can be either an AWS managed capacity provider ( FARGATE or FARGATE_SPOT) or the name of a custom capacity provider that you created.",
+  ).optional(),
+  Weight: z.number().int().describe(
+    "The *weight* value designates the relative percentage of the total number of tasks launched that should use the specified capacity provider. The weight value is taken into consideration after the base value, if defined, is satisfied. If no weight value is specified, the default value of 0 is used. When multiple capacity providers are specified within a capacity provider strategy, at least one of the capacity providers must have a weight value greater than zero and any capacity providers with a weight of 0 can't be used to place tasks. If you specify multiple capacity providers in a strategy that all have a weight of 0, any RunTask or CreateService actions using the capacity provider strategy will fail. Weight value characteristics: Weight is considered after the base value is satisfied The default value is 0 if not specified The valid range is 0 to 1,000 At least one capacity provider must have a weight greater than zero Capacity providers with weight of 0 cannot place tasks Task distribution logic: 1. Base satisfaction: The minimum number of tasks specified by the base value are placed on that capacity provider 1. Weight distribution: After base requirements are met, additional tasks are distributed according to weight ratios Examples: Equal Distribution: Two capacity providers both with weight 1 will split tasks evenly after base requirements are met. Weighted Distribution: If capacityProviderA has weight 1 and capacityProviderB has weight 4, then for every 1 task on A, 4 tasks will run on B.",
+  ).optional(),
+  Base: z.number().int().describe(
+    "The *base* value designates how many tasks, at a minimum, to run on the specified capacity provider for each service. Only one capacity provider in a capacity provider strategy can have a *base* defined. If no value is specified, the default value of 0 is used. Base value characteristics: Only one capacity provider in a strategy can have a base defined The default value is 0 if not specified The valid range is 0 to 100,000 Base requirements are satisfied first before weight distribution",
+  ).optional(),
+});
+
+export const ManagedStorageConfigurationSchema = z.object({
+  FargateEphemeralStorageKmsKeyId: z.string().describe(
+    "Specify the KMSlong key ID for Fargate ephemeral storage. When you specify a fargateEphemeralStorageKmsKeyId, AWS Fargate uses the key to encrypt data at rest in ephemeral storage. For more information about Fargate ephemeral storage encryption, see [Customer managed keys for Fargate ephemeral storage for Amazon ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/fargate-storage-encryption.html) in the *Amazon Elastic Container Service Developer Guide*. The key must be a single Region key.",
+  ).optional(),
+  KmsKeyId: z.string().describe(
+    "Specify a KMSlong key ID to encrypt Amazon ECS managed storage. When you specify a kmsKeyId, Amazon ECS uses the key to encrypt data volumes managed by Amazon ECS that are attached to tasks in the cluster. The following data volumes are managed by Amazon ECS: Amazon EBS. For more information about encryption of Amazon EBS volumes attached to Amazon ECS tasks, see [Encrypt data stored in Amazon EBS volumes for Amazon ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ebs-kms-encryption.html) in the *Amazon Elastic Container Service Developer Guide*. The key must be a single Region key.",
+  ).optional(),
+});
+
+export const ExecuteCommandLogConfigurationSchema = z.object({
+  S3EncryptionEnabled: z.boolean().describe(
+    "Determines whether to use encryption on the S3 logs. If not specified, encryption is not used.",
+  ).optional(),
+  CloudWatchEncryptionEnabled: z.boolean().describe(
+    "Determines whether to use encryption on the CloudWatch logs. If not specified, encryption will be off.",
+  ).optional(),
+  CloudWatchLogGroupName: z.string().describe(
+    "The name of the CloudWatch log group to send logs to. The CloudWatch log group must already be created.",
+  ).optional(),
+  S3KeyPrefix: z.string().describe(
+    "An optional folder in the S3 bucket to place logs in.",
+  ).optional(),
+  S3BucketName: z.string().describe(
+    "The name of the S3 bucket to send logs to. The S3 bucket must already be created.",
+  ).optional(),
+});
+
+export const ExecuteCommandConfigurationSchema = z.object({
+  Logging: z.string().describe(
+    "The log setting to use for redirecting logs for your execute command results. The following log settings are available. NONE: The execute command session is not logged. DEFAULT: The awslogs configuration in the task definition is used. If no logging parameter is specified, it defaults to this value. If no awslogs log driver is configured in the task definition, the output won't be logged. OVERRIDE: Specify the logging details as a part of logConfiguration. If the OVERRIDE logging option is specified, the logConfiguration is required.",
+  ).optional(),
+  KmsKeyId: z.string().describe(
+    "Specify an KMSlong key ID to encrypt the data between the local client and the container.",
+  ).optional(),
+  LogConfiguration: ExecuteCommandLogConfigurationSchema.describe(
+    "The log configuration for the results of the execute command actions. The logs can be sent to CloudWatch Logs or an Amazon S3 bucket. When logging=OVERRIDE is specified, a logConfiguration must be provided.",
+  ).optional(),
+});
+
+export const TagSchema = z.object({
+  Value: z.string().describe(
+    "The optional part of a key-value pair that make up a tag. A value acts as a descriptor within a tag category (key).",
+  ).optional(),
+  Key: z.string().describe(
+    "One part of a key-value pair that make up a tag. A key is a general label that acts like a category for more specific tag values.",
+  ).optional(),
+});
+
+const GlobalArgsSchema = z.object({
+  ClusterSettings: z.array(ClusterSettingsSchema).describe(
+    "The settings to use when creating a cluster. This parameter is used to turn on CloudWatch Container Insights with enhanced observability or CloudWatch Container Insights for a cluster. Container Insights with enhanced observability provides all the Container Insights metrics, plus additional task and container metrics. This version supports enhanced observability for Amazon ECS clusters using the Amazon EC2 and Fargate launch types. After you configure Container Insights with enhanced observability on Amazon ECS, Container Insights auto-collects detailed infrastructure telemetry from the cluster level down to the container level in your environment and displays these critical performance data in curated dashboards removing the heavy lifting in observability set-up. For more information, see [Monitor Amazon ECS containers using Container Insights with enhanced observability](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/cloudwatch-container-insights.html) in the *Amazon Elastic Container Service Developer Guide*.",
+  ).optional(),
+  DefaultCapacityProviderStrategy: z.array(CapacityProviderStrategyItemSchema)
+    .describe(
+      "The default capacity provider strategy for the cluster. When services or tasks are run in the cluster with no launch type or capacity provider strategy specified, the default capacity provider strategy is used.",
+    ).optional(),
+  Configuration: z.object({
+    ManagedStorageConfiguration: ManagedStorageConfigurationSchema.describe(
+      "The details of the managed storage configuration.",
+    ).optional(),
+    ExecuteCommandConfiguration: ExecuteCommandConfigurationSchema.describe(
+      "The details of the execute command configuration.",
+    ).optional(),
+  }).describe(
+    "The execute command and managed storage configuration for the cluster.",
+  ).optional(),
+  ServiceConnectDefaults: z.object({
+    Namespace: z.string().describe(
+      'The namespace name or full Amazon Resource Name (ARN) of the CMAPlong namespace that\'s used when you create a service and don\'t specify a Service Connect configuration. The namespace name can include up to 1024 characters. The name is case-sensitive. The name can\'t include greater than (>), less than (<), double quotation marks ("), or slash (/). If you enter an existing namespace name or ARN, then that namespace will be used. Any namespace type is supported. The namespace must be in this account and this AWS Region. If you enter a new name, a CMAPlong namespace will be created. Amazon ECS creates a CMAP namespace with the "API calls" method of instance discovery only. This instance discovery method is the "HTTP" namespace type in the CLIlong. Other types of instance discovery aren\'t used by Service Connect. If you update the cluster with an empty string "" for the namespace name, the cluster configuration for Service Connect is removed. Note that the namespace will remain in CMAP and must be deleted separately. For more information about CMAPlong, see [Working with Services](https://docs.aws.amazon.com/cloud-map/latest/dg/working-with-services.html) in the *Developer Guide*.',
+    ).optional(),
+  }).describe(
+    "Use this parameter to set a default Service Connect namespace. After you set a default Service Connect namespace, any new services with Service Connect turned on that are created in the cluster are added as client services in the namespace. This setting only applies to new services that set the enabled parameter to true in the ServiceConnectConfiguration. You can set the namespace of each service individually in the ServiceConnectConfiguration to override this default parameter. Tasks that run in a namespace can use short names to connect to services in the namespace. Tasks can connect to services across all of the clusters in the namespace. Tasks connect through a managed proxy container that collects logs and metrics for increased visibility. Only the tasks that Amazon ECS services create are supported with Service Connect. For more information, see [Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html) in the *Amazon Elastic Container Service Developer Guide*.",
+  ).optional(),
+  CapacityProviders: z.array(z.string()).describe(
+    "The short name of one or more capacity providers to associate with the cluster. A capacity provider must be associated with a cluster before it can be included as part of the default capacity provider strategy of the cluster or used in a capacity provider strategy when calling the [CreateService](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateService.html) or [RunTask](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html) actions. If specifying a capacity provider that uses an Auto Scaling group, the capacity provider must be created but not associated with another cluster. New Auto Scaling group capacity providers can be created with the [CreateCapacityProvider](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateCapacityProvider.html) API operation. To use a FARGATElong capacity provider, specify either the FARGATE or FARGATE_SPOT capacity providers. The FARGATElong capacity providers are available to all accounts and only need to be associated with a cluster to be used. The [PutCapacityProvider](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_PutCapacityProvider.html) API operation is used to update the list of available capacity providers for a cluster after the cluster is created.",
+  ).optional(),
+  ClusterName: z.string().describe(
+    "A user-generated string that you use to identify your cluster. If you don't specify a name, CFNlong generates a unique physical ID for the name.",
+  ).optional(),
+  Tags: z.array(TagSchema).describe(
+    "The metadata that you apply to the cluster to help you categorize and organize them. Each tag consists of a key and an optional value. You define both. The following basic restrictions apply to tags: Maximum number of tags per resource - 50 For each resource, each tag key must be unique, and each tag key can have only one value. Maximum key length - 128 Unicode characters in UTF-8 Maximum value length - 256 Unicode characters in UTF-8 If your tagging schema is used across multiple services and resources, remember that other services may have restrictions on allowed characters. Generally allowed characters are: letters, numbers, and spaces representable in UTF-8, and the following characters: + - =. _: / @. Tag keys and values are case-sensitive. Do not use aws:, AWS:, or any upper or lowercase combination of such as a prefix for either keys or values as it is reserved for AWS use. You cannot edit or delete tag keys or values with this prefix. Tags with this prefix do not count against your tags per resource limit.",
+  ).optional(),
+});
+
+const StateSchema = z.object({
+  ClusterSettings: z.array(ClusterSettingsSchema).optional(),
+  DefaultCapacityProviderStrategy: z.array(CapacityProviderStrategyItemSchema)
+    .optional(),
+  Configuration: z.object({
+    ManagedStorageConfiguration: ManagedStorageConfigurationSchema,
+    ExecuteCommandConfiguration: ExecuteCommandConfigurationSchema,
+  }).optional(),
+  ServiceConnectDefaults: z.object({
+    Namespace: z.string(),
+  }).optional(),
+  CapacityProviders: z.array(z.string()).optional(),
+  ClusterName: z.string(),
+  Arn: z.string().optional(),
+  Tags: z.array(TagSchema).optional(),
+}).passthrough();
+
+type StateData = z.infer<typeof StateSchema>;
+
+const InputsSchema = z.object({
+  ClusterSettings: z.array(ClusterSettingsSchema).describe(
+    "The settings to use when creating a cluster. This parameter is used to turn on CloudWatch Container Insights with enhanced observability or CloudWatch Container Insights for a cluster. Container Insights with enhanced observability provides all the Container Insights metrics, plus additional task and container metrics. This version supports enhanced observability for Amazon ECS clusters using the Amazon EC2 and Fargate launch types. After you configure Container Insights with enhanced observability on Amazon ECS, Container Insights auto-collects detailed infrastructure telemetry from the cluster level down to the container level in your environment and displays these critical performance data in curated dashboards removing the heavy lifting in observability set-up. For more information, see [Monitor Amazon ECS containers using Container Insights with enhanced observability](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/cloudwatch-container-insights.html) in the *Amazon Elastic Container Service Developer Guide*.",
+  ).optional(),
+  DefaultCapacityProviderStrategy: z.array(CapacityProviderStrategyItemSchema)
+    .describe(
+      "The default capacity provider strategy for the cluster. When services or tasks are run in the cluster with no launch type or capacity provider strategy specified, the default capacity provider strategy is used.",
+    ).optional(),
+  Configuration: z.object({
+    ManagedStorageConfiguration: ManagedStorageConfigurationSchema.describe(
+      "The details of the managed storage configuration.",
+    ).optional(),
+    ExecuteCommandConfiguration: ExecuteCommandConfigurationSchema.describe(
+      "The details of the execute command configuration.",
+    ).optional(),
+  }).describe(
+    "The execute command and managed storage configuration for the cluster.",
+  ).optional(),
+  ServiceConnectDefaults: z.object({
+    Namespace: z.string().describe(
+      'The namespace name or full Amazon Resource Name (ARN) of the CMAPlong namespace that\'s used when you create a service and don\'t specify a Service Connect configuration. The namespace name can include up to 1024 characters. The name is case-sensitive. The name can\'t include greater than (>), less than (<), double quotation marks ("), or slash (/). If you enter an existing namespace name or ARN, then that namespace will be used. Any namespace type is supported. The namespace must be in this account and this AWS Region. If you enter a new name, a CMAPlong namespace will be created. Amazon ECS creates a CMAP namespace with the "API calls" method of instance discovery only. This instance discovery method is the "HTTP" namespace type in the CLIlong. Other types of instance discovery aren\'t used by Service Connect. If you update the cluster with an empty string "" for the namespace name, the cluster configuration for Service Connect is removed. Note that the namespace will remain in CMAP and must be deleted separately. For more information about CMAPlong, see [Working with Services](https://docs.aws.amazon.com/cloud-map/latest/dg/working-with-services.html) in the *Developer Guide*.',
+    ).optional(),
+  }).describe(
+    "Use this parameter to set a default Service Connect namespace. After you set a default Service Connect namespace, any new services with Service Connect turned on that are created in the cluster are added as client services in the namespace. This setting only applies to new services that set the enabled parameter to true in the ServiceConnectConfiguration. You can set the namespace of each service individually in the ServiceConnectConfiguration to override this default parameter. Tasks that run in a namespace can use short names to connect to services in the namespace. Tasks can connect to services across all of the clusters in the namespace. Tasks connect through a managed proxy container that collects logs and metrics for increased visibility. Only the tasks that Amazon ECS services create are supported with Service Connect. For more information, see [Service Connect](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-connect.html) in the *Amazon Elastic Container Service Developer Guide*.",
+  ).optional(),
+  CapacityProviders: z.array(z.string()).describe(
+    "The short name of one or more capacity providers to associate with the cluster. A capacity provider must be associated with a cluster before it can be included as part of the default capacity provider strategy of the cluster or used in a capacity provider strategy when calling the [CreateService](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateService.html) or [RunTask](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html) actions. If specifying a capacity provider that uses an Auto Scaling group, the capacity provider must be created but not associated with another cluster. New Auto Scaling group capacity providers can be created with the [CreateCapacityProvider](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_CreateCapacityProvider.html) API operation. To use a FARGATElong capacity provider, specify either the FARGATE or FARGATE_SPOT capacity providers. The FARGATElong capacity providers are available to all accounts and only need to be associated with a cluster to be used. The [PutCapacityProvider](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_PutCapacityProvider.html) API operation is used to update the list of available capacity providers for a cluster after the cluster is created.",
+  ).optional(),
+  ClusterName: z.string().describe(
+    "A user-generated string that you use to identify your cluster. If you don't specify a name, CFNlong generates a unique physical ID for the name.",
+  ).optional(),
+  Tags: z.array(TagSchema).describe(
+    "The metadata that you apply to the cluster to help you categorize and organize them. Each tag consists of a key and an optional value. You define both. The following basic restrictions apply to tags: Maximum number of tags per resource - 50 For each resource, each tag key must be unique, and each tag key can have only one value. Maximum key length - 128 Unicode characters in UTF-8 Maximum value length - 256 Unicode characters in UTF-8 If your tagging schema is used across multiple services and resources, remember that other services may have restrictions on allowed characters. Generally allowed characters are: letters, numbers, and spaces representable in UTF-8, and the following characters: + - =. _: / @. Tag keys and values are case-sensitive. Do not use aws:, AWS:, or any upper or lowercase combination of such as a prefix for either keys or values as it is reserved for AWS use. You cannot edit or delete tag keys or values with this prefix. Tags with this prefix do not count against your tags per resource limit.",
+  ).optional(),
+});
+
+export const model = {
+  type: "@swamp/aws/ecs/cluster",
+  version: "2026.03.19.1",
+  globalArguments: GlobalArgsSchema,
+  inputsSchema: InputsSchema,
+  resources: {
+    state: {
+      description: "ECS Cluster resource state",
+      schema: StateSchema,
+      lifetime: "infinite",
+      garbageCollection: 10,
+    },
+  },
+  methods: {
+    create: {
+      description: "Create a ECS Cluster",
+      arguments: z.object({}),
+      execute: async (_args: Record<string, never>, context: any) => {
+        const g = context.globalArgs;
+        const desiredState: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(g)) {
+          if (value !== undefined) desiredState[key] = value;
+        }
+        const result = await createResource(
+          "AWS::ECS::Cluster",
+          desiredState,
+        ) as StateData;
+        const instanceName =
+          (result.ClusterName ?? g.ClusterName)?.toString() ?? "current";
+        const handle = await context.writeResource(
+          "state",
+          instanceName,
+          result,
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+    get: {
+      description: "Get a ECS Cluster",
+      arguments: z.object({
+        identifier: z.string().describe(
+          "The primary identifier of the ECS Cluster",
+        ),
+      }),
+      execute: async (args: { identifier: string }, context: any) => {
+        const result = await readResource(
+          "AWS::ECS::Cluster",
+          args.identifier,
+        ) as StateData;
+        const instanceName =
+          (result.ClusterName ?? context.globalArgs.ClusterName)?.toString() ??
+            args.identifier;
+        const handle = await context.writeResource(
+          "state",
+          instanceName,
+          result,
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+    update: {
+      description: "Update a ECS Cluster",
+      arguments: z.object({}),
+      execute: async (_args: Record<string, never>, context: any) => {
+        const g = context.globalArgs;
+        const instanceName = g.ClusterName?.toString() ?? "current";
+        const content = await context.dataRepository.getContent(
+          context.modelType,
+          context.modelId,
+          instanceName,
+        );
+        if (!content) {
+          throw new Error("No existing state found - run create or get first");
+        }
+        const existing = JSON.parse(new TextDecoder().decode(content));
+        const identifier = existing.ClusterName?.toString();
+        if (!identifier) {
+          throw new Error("No identifier found in existing state");
+        }
+        const currentState = await readResource(
+          "AWS::ECS::Cluster",
+          identifier,
+        ) as StateData;
+        const desiredState: Record<string, unknown> = { ...currentState };
+        for (const [key, value] of Object.entries(g)) {
+          if (value !== undefined) desiredState[key] = value;
+        }
+        const result = await updateResource(
+          "AWS::ECS::Cluster",
+          identifier,
+          currentState,
+          desiredState,
+          ["ClusterName"],
+        );
+        const handle = await context.writeResource(
+          "state",
+          instanceName,
+          result,
+        );
+        return { dataHandles: [handle] };
+      },
+    },
+    delete: {
+      description: "Delete a ECS Cluster",
+      arguments: z.object({
+        identifier: z.string().describe(
+          "The primary identifier of the ECS Cluster",
+        ),
+      }),
+      execute: async (args: { identifier: string }, context: any) => {
+        const { existed } = await deleteResource(
+          "AWS::ECS::Cluster",
+          args.identifier,
+        );
+        const instanceName = context.globalArgs.ClusterName?.toString() ??
+          args.identifier;
+        const handle = await context.writeResource("state", instanceName, {
+          identifier: args.identifier,
+          existed,
+          status: existed ? "deleted" : "not_found",
+          deletedAt: new Date().toISOString(),
+        });
+        return { dataHandles: [handle] };
+      },
+    },
+    sync: {
+      description: "Sync ECS Cluster state from AWS",
+      arguments: z.object({}),
+      execute: async (_args: Record<string, never>, context: any) => {
+        const g = context.globalArgs;
+        const instanceName = g.ClusterName?.toString() ?? "current";
+        const content = await context.dataRepository.getContent(
+          context.modelType,
+          context.modelId,
+          instanceName,
+        );
+        if (!content) {
+          throw new Error("No existing state found - run create or get first");
+        }
+        const existing = JSON.parse(new TextDecoder().decode(content));
+        const identifier = existing.ClusterName?.toString();
+        if (!identifier) {
+          throw new Error("No identifier found in existing state");
+        }
+        try {
+          const result = await readResource(
+            "AWS::ECS::Cluster",
+            identifier,
+          ) as StateData;
+          const handle = await context.writeResource(
+            "state",
+            instanceName,
+            result,
+          );
+          return { dataHandles: [handle] };
+        } catch (error: unknown) {
+          if (isResourceNotFoundError(error)) {
+            const handle = await context.writeResource("state", instanceName, {
+              identifier,
+              status: "not_found",
+              syncedAt: new Date().toISOString(),
+            });
+            return { dataHandles: [handle] };
+          }
+          throw error;
+        }
+      },
+    },
+  },
+};

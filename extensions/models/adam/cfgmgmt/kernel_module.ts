@@ -106,7 +106,7 @@ function detectChanges(g, current) {
 
 export const model = {
   type: "@adam/cfgmgmt/kernel_module",
-  version: "2026.03.04.1",
+  version: "2026.03.18.1",
   globalArguments: GlobalArgsSchema,
   inputsSchema: z.object({
     nodeHost: z.string().optional().describe(
@@ -242,4 +242,5 @@ export const model = {
       },
     },
   },
+  reports: [],
 };
