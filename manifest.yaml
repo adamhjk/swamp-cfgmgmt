@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: "@adam/cfgmgmt"
-version: "2026.03.04.2"
+version: "2026.03.27.1"
 description: |
   SSH-based configuration management for Linux and macOS.
 
@@ -9,7 +9,7 @@ description: |
   applied, or failed. Convergence failures propagate as step failures so
   workflow orchestration can detect and react to errors.
 
-  Includes 33 model types:
+  Includes 36 model types:
   - **@adam/cfgmgmt/node** — Gather system facts (OS, arch, package managers)
   - **@adam/cfgmgmt/file** — Create, update, or remove files
   - **@adam/cfgmgmt/template** — Render EJS templates and deploy to remote hosts.
@@ -44,8 +44,11 @@ description: |
   - **@adam/cfgmgmt/docker_container** — Manage Docker containers
   - **@adam/cfgmgmt/git** — Manage git repository checkouts
   - **@adam/cfgmgmt/archive** — Extract archives idempotently
+  - **@adam/cfgmgmt/copy_file** — Copy a local file to remote hosts via SCP
   - **@adam/cfgmgmt/fetch** — Download files from URLs with checksum verification
   - **@adam/cfgmgmt/reboot** — Reboot hosts and wait for SSH reconnection
+  - **@adam/cfgmgmt/debug_exec** — Run a command on a remote host and capture stdout, stderr, and exit code as data
+  - **@adam/cfgmgmt/debug_file** — Fetch a remote file's content and store it as data
   - **@adam/cfgmgmt/certificate** — Deploy SSL/TLS certificates with validation
 
   Every model is a factory across hosts — a single definition can target
@@ -90,9 +93,12 @@ models:
   - adam/cfgmgmt/git.ts
   - adam/cfgmgmt/archive.ts
   - adam/cfgmgmt/line.ts
+  - adam/cfgmgmt/copy_file.ts
   - adam/cfgmgmt/fetch.ts
   - adam/cfgmgmt/apt_repository.ts
   - adam/cfgmgmt/dnf_repository.ts
   - adam/cfgmgmt/kernel_module.ts
   - adam/cfgmgmt/reboot.ts
+  - adam/cfgmgmt/debug_exec.ts
+  - adam/cfgmgmt/debug_file.ts
   - adam/cfgmgmt/certificate.ts

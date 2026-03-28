@@ -269,6 +269,60 @@ export async function writeFileAs(
   }
 }
 
+export async function scpFile(
+  conn: SshConn,
+  localPath: string,
+  remotePath: string,
+): Promise<void> {
+  const args = [
+    "-o",
+    `ControlPath=${conn.socketPath}`,
+    "-P",
+    String(conn.port),
+    "-o",
+    "StrictHostKeyChecking=no",
+    "-o",
+    "BatchMode=yes",
+  ];
+  if (conn.identityFile) args.push("-i", conn.identityFile);
+  args.push(localPath, `${conn.username}@${conn.host}:${remotePath}`);
+
+  const cmd = new Deno.Command("scp", {
+    args,
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await cmd.output();
+  if (output.code !== 0) {
+    const stderr = new TextDecoder().decode(output.stderr);
+    throw new Error(`scp ${localPath} to ${remotePath} failed: ${stderr}`);
+  }
+}
+
+export async function scpFileAs(
+  conn: SshConn,
+  localPath: string,
+  remotePath: string,
+  opts?: BecomeOpts,
+): Promise<void> {
+  if (!opts?.become) {
+    return scpFile(conn, localPath, remotePath);
+  }
+  const tmpName = `/tmp/.swamp-upload-${crypto.randomUUID()}`;
+  await scpFile(conn, localPath, tmpName);
+  const mv = wrapSudo(
+    `mv ${shellEscape(tmpName)} ${shellEscape(remotePath)}`,
+    opts,
+  );
+  const result = await exec(conn, mv);
+  if (result.exitCode !== 0) {
+    await exec(conn, `rm -f ${shellEscape(tmpName)}`);
+    throw new Error(
+      `scpFileAs mv to ${remotePath} failed: ${result.stderr}`,
+    );
+  }
+}
+
 export function closeAll(): void {
   for (const conn of pool().values()) {
     try {

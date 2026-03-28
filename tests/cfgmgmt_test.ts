@@ -20,6 +20,9 @@ const SSH_KEY = "/tmp/cfgmgmt-test-key";
 const TEST_TEMPLATE_FILE = `${TEST_DIR}/rendered.conf`;
 const TEST_LINE_FILE = `${TEST_DIR}/line-test.conf`;
 const TEST_FETCH_FILE = `${TEST_DIR}/fetched.txt`;
+const TEST_COPY_SOURCE = `${TEST_DIR}/copy-source.txt`;
+const TEST_COPY_DEST = `${TEST_DIR}/copy-dest.txt`;
+const TEST_DEBUG_READ_FILE = `${TEST_DIR}/debug-read.txt`;
 
 const NODE_NAME = `test-node-${TIMESTAMP}`;
 const DIR_NAME = `test-dir-${TIMESTAMP}`;
@@ -28,6 +31,9 @@ const LINK_NAME = `test-link-${TIMESTAMP}`;
 const TEMPLATE_NAME = `test-template-${TIMESTAMP}`;
 const LINE_NAME = `test-line-${TIMESTAMP}`;
 const FETCH_NAME = `test-fetch-${TIMESTAMP}`;
+const COPY_FILE_NAME = `test-copy-file-${TIMESTAMP}`;
+const DEBUG_EXEC_NAME = `test-debug-exec-${TIMESTAMP}`;
+const DEBUG_FILE_NAME = `test-debug-file-${TIMESTAMP}`;
 
 const modelNames = [
   NODE_NAME,
@@ -37,6 +43,9 @@ const modelNames = [
   TEMPLATE_NAME,
   LINE_NAME,
   FETCH_NAME,
+  COPY_FILE_NAME,
+  DEBUG_EXEC_NAME,
+  DEBUG_FILE_NAME,
 ];
 const modelPaths: Record<string, string> = {};
 
@@ -223,6 +232,46 @@ async function setup() {
     ].join("\n") + "\n",
   );
 
+  await createAndEdit(
+    "@adam/cfgmgmt/copy_file",
+    COPY_FILE_NAME,
+    [
+      `  source: "${TEST_COPY_SOURCE}"`,
+      `  path: "${TEST_COPY_DEST}"`,
+      `  ensure: present`,
+      `  owner: "${USER}"`,
+      `  mode: "0644"`,
+      `  nodeHost: "127.0.0.1"`,
+      `  nodeUser: "${USER}"`,
+      `  nodePort: 22`,
+      `  nodeIdentityFile: "${SSH_KEY}"`,
+    ].join("\n") + "\n",
+  );
+
+  await createAndEdit(
+    "@adam/cfgmgmt/debug_exec",
+    DEBUG_EXEC_NAME,
+    [
+      `  command: "echo hello from debug"`,
+      `  nodeHost: "127.0.0.1"`,
+      `  nodeUser: "${USER}"`,
+      `  nodePort: 22`,
+      `  nodeIdentityFile: "${SSH_KEY}"`,
+    ].join("\n") + "\n",
+  );
+
+  await createAndEdit(
+    "@adam/cfgmgmt/debug_file",
+    DEBUG_FILE_NAME,
+    [
+      `  path: "${TEST_DEBUG_READ_FILE}"`,
+      `  nodeHost: "127.0.0.1"`,
+      `  nodeUser: "${USER}"`,
+      `  nodePort: 22`,
+      `  nodeIdentityFile: "${SSH_KEY}"`,
+    ].join("\n") + "\n",
+  );
+
   await swamp("repo", "index");
 
   for (const name of modelNames) {
@@ -285,11 +334,14 @@ Deno.test({
             "@adam/cfgmgmt/link",
             "@adam/cfgmgmt/line",
             "@adam/cfgmgmt/fetch",
+            "@adam/cfgmgmt/copy_file",
             "@adam/cfgmgmt/apt_repository",
             "@adam/cfgmgmt/dnf_repository",
             "@adam/cfgmgmt/kernel_module",
             "@adam/cfgmgmt/reboot",
             "@adam/cfgmgmt/certificate",
+            "@adam/cfgmgmt/debug_exec",
+            "@adam/cfgmgmt/debug_file",
           ]
         ) {
           if (!types.includes(e)) throw new Error(`Missing type: ${e}`);
@@ -591,6 +643,186 @@ Deno.test({
           );
         }
       });
+
+      // --- copy_file model tests ---
+
+      await t.step("copy_file check detects non-compliant", async () => {
+        // Create the local source file
+        await Deno.writeTextFile(TEST_COPY_SOURCE, "copy file content\n");
+        const state = await runMethod(COPY_FILE_NAME, "check");
+        if (state.status !== "non_compliant") {
+          throw new Error(`Expected non_compliant, got: ${state.status}`);
+        }
+      });
+
+      await t.step("copy_file apply copies file", async () => {
+        const state = await runMethod(COPY_FILE_NAME, "apply");
+        if (state.status !== "applied") {
+          throw new Error(
+            `Expected applied, got: ${state.status}\nError: ${state.error}`,
+          );
+        }
+        const content = await Deno.readTextFile(TEST_COPY_DEST);
+        if (content !== "copy file content\n") {
+          throw new Error(
+            `Expected 'copy file content\\n', got: ${JSON.stringify(content)}`,
+          );
+        }
+      });
+
+      await t.step("copy_file check after apply is compliant", async () => {
+        const state = await runMethod(COPY_FILE_NAME, "check");
+        if (state.status !== "compliant") {
+          throw new Error(
+            `Expected compliant, got: ${state.status}\nChanges: ${
+              JSON.stringify(state.changes)
+            }`,
+          );
+        }
+      });
+
+      await t.step("copy_file apply is idempotent", async () => {
+        const state = await runMethod(COPY_FILE_NAME, "apply");
+        if (state.status !== "compliant") {
+          throw new Error(
+            `Expected compliant (idempotent), got: ${state.status}`,
+          );
+        }
+      });
+
+      await t.step(
+        "copy_file source change detects non-compliant",
+        async () => {
+          await Deno.writeTextFile(TEST_COPY_SOURCE, "updated content\n");
+          const state = await runMethod(COPY_FILE_NAME, "check");
+          if (state.status !== "non_compliant") {
+            throw new Error(`Expected non_compliant, got: ${state.status}`);
+          }
+        },
+      );
+
+      await t.step("copy_file apply with changed source", async () => {
+        const state = await runMethod(COPY_FILE_NAME, "apply");
+        if (state.status !== "applied") {
+          throw new Error(
+            `Expected applied, got: ${state.status}\nError: ${state.error}`,
+          );
+        }
+        const content = await Deno.readTextFile(TEST_COPY_DEST);
+        if (content !== "updated content\n") {
+          throw new Error(
+            `Expected 'updated content\\n', got: ${JSON.stringify(content)}`,
+          );
+        }
+      });
+
+      await t.step("copy_file apply absent removes file", async () => {
+        await editModelEnsure(COPY_FILE_NAME, "present", "absent");
+        const state = await runMethod(COPY_FILE_NAME, "apply");
+        if (state.status !== "applied") {
+          throw new Error(
+            `Expected applied, got: ${state.status}\nError: ${state.error}`,
+          );
+        }
+        try {
+          await Deno.stat(TEST_COPY_DEST);
+          throw new Error("Copy dest file should not exist after absent apply");
+        } catch (e) {
+          if (!(e instanceof Deno.errors.NotFound)) throw e;
+        }
+      });
+
+      // --- debug_exec model tests ---
+
+      await t.step("debug_exec run captures output", async () => {
+        const state = await runMethod(DEBUG_EXEC_NAME, "run");
+        if (!((state.stdout as string).includes("hello from debug"))) {
+          throw new Error(
+            `Expected stdout to contain 'hello from debug', got: ${
+              JSON.stringify(state.stdout)
+            }`,
+          );
+        }
+        if (state.exitCode !== 0) {
+          throw new Error(`Expected exitCode 0, got: ${state.exitCode}`);
+        }
+        if (state.error !== null) {
+          throw new Error(`Expected null error, got: ${state.error}`);
+        }
+      });
+
+      await t.step(
+        "debug_exec run captures non-zero exit without throwing",
+        async () => {
+          const yamlPath = modelPaths[DEBUG_EXEC_NAME];
+          const content = await Deno.readTextFile(yamlPath);
+          await Deno.writeTextFile(
+            yamlPath,
+            content.replace(
+              'command: "echo hello from debug"',
+              'command: "exit 42"',
+            ),
+          );
+          await swamp("repo", "index");
+
+          const state = await runMethod(DEBUG_EXEC_NAME, "run");
+          if (state.exitCode !== 42) {
+            throw new Error(`Expected exitCode 42, got: ${state.exitCode}`);
+          }
+        },
+      );
+
+      // --- debug_file model tests ---
+
+      await t.step("debug_file run captures file content", async () => {
+        await Deno.writeTextFile(TEST_DEBUG_READ_FILE, "debug file content\n");
+        const state = await runMethod(DEBUG_FILE_NAME, "run");
+        if (state.exists !== true) {
+          throw new Error(`Expected exists true, got: ${state.exists}`);
+        }
+        if ((state.content as string) !== "debug file content\n") {
+          throw new Error(
+            `Expected 'debug file content\\n', got: ${
+              JSON.stringify(state.content)
+            }`,
+          );
+        }
+        if ((state.size as number) <= 0) {
+          throw new Error(`Expected size > 0, got: ${state.size}`);
+        }
+        if (state.error !== null) {
+          throw new Error(`Expected null error, got: ${state.error}`);
+        }
+      });
+
+      await t.step(
+        "debug_file run handles missing file without throwing",
+        async () => {
+          const yamlPath = modelPaths[DEBUG_FILE_NAME];
+          const content = await Deno.readTextFile(yamlPath);
+          await Deno.writeTextFile(
+            yamlPath,
+            content.replace(
+              `path: "${TEST_DEBUG_READ_FILE}"`,
+              `path: "/tmp/cfgmgmt-nonexistent-${TIMESTAMP}.txt"`,
+            ),
+          );
+          await swamp("repo", "index");
+
+          const state = await runMethod(DEBUG_FILE_NAME, "run");
+          if (state.exists !== false) {
+            throw new Error(`Expected exists false, got: ${state.exists}`);
+          }
+          if ((state.content as string) !== "") {
+            throw new Error(
+              `Expected empty content, got: ${JSON.stringify(state.content)}`,
+            );
+          }
+          if ((state.size as number) !== 0) {
+            throw new Error(`Expected size 0, got: ${state.size}`);
+          }
+        },
+      );
 
       // --- cleanup section ---
 
