@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   port: z.number().describe("Port number"),
@@ -12,7 +12,8 @@ const GlobalArgsSchema = z.object({
   direction: z.enum(["in", "out"]).default("in").describe(
     "Traffic direction",
   ),
-  source: z.string().optional().describe("Source CIDR (e.g. 10.0.0.0/8)"),
+  source: z.string().regex(/^[0-9a-fA-F.:\/]+$/, "Must be valid CIDR notation")
+    .optional().describe("Source CIDR (e.g. 10.0.0.0/8)"),
   ensure: z.enum(["present", "absent"]).default("present").describe(
     "Whether the rule should be present or absent",
   ),
@@ -68,23 +69,26 @@ function connect(g) {
 
 async function detectBackend(client, g) {
   const so = sudoOpts(g);
-  const ufw = await exec(
+  const ufw = await execSudo(
     client,
-    wrapSudo(`ufw status 2>/dev/null | head -1`, so),
+    `ufw status 2>/dev/null | head -1`,
+    so,
   );
   if (ufw.exitCode === 0 && ufw.stdout.includes("active")) return "ufw";
 
-  const firewalld = await exec(
+  const firewalld = await execSudo(
     client,
-    wrapSudo(`firewall-cmd --state 2>/dev/null`, so),
+    `firewall-cmd --state 2>/dev/null`,
+    so,
   );
   if (firewalld.exitCode === 0 && firewalld.stdout.trim() === "running") {
     return "firewalld";
   }
 
-  const iptables = await exec(
+  const iptables = await execSudo(
     client,
-    wrapSudo(`command -v iptables 2>/dev/null`, so),
+    `command -v iptables 2>/dev/null`,
+    so,
   );
   if (iptables.exitCode === 0) return "iptables";
 
@@ -102,9 +106,10 @@ async function gather(client, g) {
   let ruleDetails: string | null = null;
 
   if (backend === "ufw") {
-    const result = await exec(
+    const result = await execSudo(
       client,
-      wrapSudo(`ufw status`, so),
+      `ufw status`,
+      so,
     );
     const pattern = `${g.port}/${g.protocol}`;
     for (const line of result.stdout.split("\n")) {
@@ -124,9 +129,10 @@ async function gather(client, g) {
     }
   } else if (backend === "firewalld") {
     if (g.source) {
-      const result = await exec(
+      const result = await execSudo(
         client,
-        wrapSudo(`firewall-cmd --list-rich-rules 2>/dev/null`, so),
+        `firewall-cmd --list-rich-rules 2>/dev/null`,
+        so,
       );
       const portStr = `port port="${g.port}" protocol="${g.protocol}"`;
       for (const line of result.stdout.split("\n")) {
@@ -137,9 +143,10 @@ async function gather(client, g) {
         }
       }
     } else {
-      const result = await exec(
+      const result = await execSudo(
         client,
-        wrapSudo(`firewall-cmd --list-ports 2>/dev/null`, so),
+        `firewall-cmd --list-ports 2>/dev/null`,
+        so,
       );
       const pattern = `${g.port}/${g.protocol}`;
       if (result.stdout.split(/\s+/).includes(pattern)) {
@@ -149,9 +156,10 @@ async function gather(client, g) {
     }
   } else if (backend === "iptables") {
     const chain = g.direction === "in" ? "INPUT" : "OUTPUT";
-    const result = await exec(
+    const result = await execSudo(
       client,
-      wrapSudo(`iptables -L ${chain} -n 2>/dev/null`, so),
+      `iptables -L ${chain} -n 2>/dev/null`,
+      so,
     );
     for (const line of result.stdout.split("\n")) {
       if (line.includes(`dpt:${g.port}`) && line.includes(g.protocol)) {
@@ -205,7 +213,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -298,22 +308,24 @@ export const model = {
             if (g.ensure === "present") {
               let cmd: string;
               if (g.source) {
-                cmd =
-                  `ufw ${g.action} from ${g.source} to any port ${g.port} proto ${g.protocol}`;
+                cmd = `ufw ${g.action} from ${
+                  shellEscape(g.source)
+                } to any port ${g.port} proto ${g.protocol}`;
               } else {
                 cmd = `ufw ${g.action} ${g.port}/${g.protocol}`;
               }
-              const r = await exec(client, wrapSudo(cmd, so));
+              const r = await execSudo(client, cmd, so);
               if (r.exitCode !== 0) errors.push(r.stderr);
             } else {
               let cmd: string;
               if (g.source) {
-                cmd =
-                  `ufw delete ${g.action} from ${g.source} to any port ${g.port} proto ${g.protocol}`;
+                cmd = `ufw delete ${g.action} from ${
+                  shellEscape(g.source)
+                } to any port ${g.port} proto ${g.protocol}`;
               } else {
                 cmd = `ufw delete ${g.action} ${g.port}/${g.protocol}`;
               }
-              const r = await exec(client, wrapSudo(cmd, so));
+              const r = await execSudo(client, cmd, so);
               if (r.exitCode !== 0) errors.push(r.stderr);
             }
           } else if (current.backend === "firewalld") {
@@ -324,29 +336,26 @@ export const model = {
             };
             if (g.source) {
               const fwAction = actionMap[g.action];
-              const rule =
-                `rule family="ipv4" source address="${g.source}" port port="${g.port}" protocol="${g.protocol}" ${fwAction}`;
+              const rule = `rule family="ipv4" source address=${
+                shellEscape(g.source)
+              } port port="${g.port}" protocol="${g.protocol}" ${fwAction}`;
               const flag = g.ensure === "present"
                 ? "--add-rich-rule"
                 : "--remove-rich-rule";
-              const r = await exec(
+              const r = await execSudo(
                 client,
-                wrapSudo(
-                  `firewall-cmd --permanent ${flag}='${rule}' && firewall-cmd --reload`,
-                  so,
-                ),
+                `firewall-cmd --permanent ${flag}='${rule}' && firewall-cmd --reload`,
+                so,
               );
               if (r.exitCode !== 0) errors.push(r.stderr);
             } else {
               const flag = g.ensure === "present"
                 ? "--add-port"
                 : "--remove-port";
-              const r = await exec(
+              const r = await execSudo(
                 client,
-                wrapSudo(
-                  `firewall-cmd --permanent ${flag}=${g.port}/${g.protocol} && firewall-cmd --reload`,
-                  so,
-                ),
+                `firewall-cmd --permanent ${flag}=${g.port}/${g.protocol} && firewall-cmd --reload`,
+                so,
               );
               if (r.exitCode !== 0) errors.push(r.stderr);
             }
@@ -358,9 +367,9 @@ export const model = {
             const flag = g.ensure === "present" ? "-A" : "-D";
             let cmd =
               `iptables ${flag} ${chain} -p ${g.protocol} --dport ${g.port}`;
-            if (g.source) cmd += ` -s ${g.source}`;
+            if (g.source) cmd += ` -s ${shellEscape(g.source)}`;
             cmd += ` -j ${target}`;
-            const r = await exec(client, wrapSudo(cmd, so));
+            const r = await execSudo(client, cmd, so);
             if (r.exitCode !== 0) errors.push(r.stderr);
           }
 

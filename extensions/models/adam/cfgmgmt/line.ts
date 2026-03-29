@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   path: z.string().describe("Absolute path of the file on the remote node"),
@@ -82,12 +87,10 @@ function emptyCurrent() {
 
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const fileCheck = await exec(
+  const fileCheck = await execSudo(
     client,
-    wrapSudo(
-      `test -f ${JSON.stringify(g.path)} && echo Y || echo N`,
-      so,
-    ),
+    `test -f ${shellEscape(g.path)} && echo Y || echo N`,
+    so,
   );
   const fileExists = fileCheck.stdout.trim() === "Y";
 
@@ -101,9 +104,10 @@ async function gather(client, g) {
     };
   }
 
-  const catResult = await exec(
+  const catResult = await execSudo(
     client,
-    wrapSudo(`cat ${JSON.stringify(g.path)}`, so),
+    `cat ${shellEscape(g.path)}`,
+    so,
   );
   const lines = catResult.stdout.split("\n");
   // Remove trailing empty element from split if file ends with newline
@@ -217,7 +221,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -303,9 +309,10 @@ export const model = {
 
           const dir = g.path.substring(0, g.path.lastIndexOf("/"));
           if (dir && !current.fileExists) {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`mkdir -p ${JSON.stringify(dir)}`, so),
+              `mkdir -p ${shellEscape(dir)}`,
+              so,
             );
           }
 

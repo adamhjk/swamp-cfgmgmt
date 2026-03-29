@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   source: z.string().describe("Path to the archive file on the remote node"),
@@ -65,20 +65,23 @@ function connect(g) {
 
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const sourceResult = await exec(
+  const sourceResult = await execSudo(
     client,
-    wrapSudo(`test -f ${JSON.stringify(g.source)} && echo Y || echo N`, so),
+    `test -f ${shellEscape(g.source)} && echo Y || echo N`,
+    so,
   );
-  const destResult = await exec(
+  const destResult = await execSudo(
     client,
-    wrapSudo(`test -d ${JSON.stringify(g.dest)} && echo Y || echo N`, so),
+    `test -d ${shellEscape(g.dest)} && echo Y || echo N`,
+    so,
   );
 
   let createsExists = false;
   if (g.creates) {
-    const createsResult = await exec(
+    const createsResult = await execSudo(
       client,
-      wrapSudo(`test -e ${JSON.stringify(g.creates)} && echo Y || echo N`, so),
+      `test -e ${shellEscape(g.creates)} && echo Y || echo N`,
+      so,
     );
     createsExists = createsResult.stdout.trim() === "Y";
   }
@@ -129,7 +132,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -208,14 +213,15 @@ export const model = {
           const so = sudoOpts(g);
           const format = detectFormat(g.source, g.format);
 
-          await exec(
+          await execSudo(
             client,
-            wrapSudo(`mkdir -p ${JSON.stringify(g.dest)}`, so),
+            `mkdir -p ${shellEscape(g.dest)}`,
+            so,
           );
 
           let extractCmd: string;
-          const src = JSON.stringify(g.source);
-          const dst = JSON.stringify(g.dest);
+          const src = shellEscape(g.source);
+          const dst = shellEscape(g.dest);
           switch (format) {
             case "tar":
               extractCmd = `tar -xf ${src} -C ${dst}`;
@@ -230,9 +236,10 @@ export const model = {
               extractCmd = `tar -xJf ${src} -C ${dst}`;
               break;
             case "zip": {
-              const unzipCheck = await exec(
+              const unzipCheck = await execSudo(
                 client,
-                wrapSudo(`command -v unzip`, so),
+                `command -v unzip`,
+                so,
               );
               if (unzipCheck.exitCode !== 0) {
                 throw new Error("unzip is not installed");
@@ -244,19 +251,17 @@ export const model = {
               extractCmd = `tar -xzf ${src} -C ${dst}`;
           }
 
-          const result = await exec(client, wrapSudo(extractCmd, so));
+          const result = await execSudo(client, extractCmd, so);
           if (result.exitCode !== 0) {
             throw new Error(`Extraction failed: ${result.stderr}`);
           }
 
           if (g.owner || g.group) {
             const ownership = g.group ? `${g.owner || ""}:${g.group}` : g.owner;
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(
-                `chown -R ${JSON.stringify(ownership)} ${dst}`,
-                so,
-              ),
+              `chown -R ${shellEscape(ownership)} ${dst}`,
+              so,
             );
           }
 

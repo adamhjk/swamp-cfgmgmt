@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   key: z.string().describe("Sysctl key (e.g. net.ipv4.ip_forward)"),
@@ -60,16 +65,18 @@ function confPath(key: string): string {
 
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const liveResult = await exec(
+  const liveResult = await execSudo(
     client,
-    wrapSudo(`sysctl -n ${JSON.stringify(g.key)} 2>/dev/null`, so),
+    `sysctl -n ${shellEscape(g.key)} 2>/dev/null`,
+    so,
   );
   const liveValue = liveResult.exitCode === 0 ? liveResult.stdout.trim() : null;
 
   const path = confPath(g.key);
-  const fileResult = await exec(
+  const fileResult = await execSudo(
     client,
-    wrapSudo(`cat ${JSON.stringify(path)} 2>/dev/null`, so),
+    `cat ${shellEscape(path)} 2>/dev/null`,
+    so,
   );
 
   let persisted = false;
@@ -117,7 +124,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -197,22 +206,21 @@ export const model = {
               `${g.key} = ${g.value}\n`,
               so,
             );
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(
-                `sysctl -w ${JSON.stringify(g.key + "=" + g.value)}`,
-                so,
-              ),
+              `sysctl -w ${shellEscape(g.key + "=" + g.value)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`sysctl -w failed: ${result.stderr}`);
             }
           } else {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`rm -f ${JSON.stringify(path)}`, so),
+              `rm -f ${shellEscape(path)}`,
+              so,
             );
-            await exec(client, wrapSudo(`sysctl --system`, so));
+            await execSudo(client, `sysctl --system`, so);
           }
 
           const updated = await gather(client, g);

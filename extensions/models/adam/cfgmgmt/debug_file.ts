@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   path: z.string().describe(
@@ -61,7 +61,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -81,9 +83,10 @@ export const model = {
         try {
           const client = await connect(g);
           const so = sudoOpts(g);
-          const result = await exec(
+          const result = await execSudo(
             client,
-            wrapSudo(`cat ${JSON.stringify(g.path)}`, so),
+            `cat ${shellEscape(g.path)}`,
+            so,
           );
           if (result.exitCode !== 0) {
             const handle = await context.writeResource("state", g.nodeHost, {
@@ -97,9 +100,10 @@ export const model = {
             });
             return { dataHandles: [handle] };
           }
-          const sizeResult = await exec(
+          const sizeResult = await execSudo(
             client,
-            wrapSudo(`stat -c '%s' ${JSON.stringify(g.path)}`, so),
+            `stat -c '%s' ${shellEscape(g.path)}`,
+            so,
           );
           const size = parseInt(sizeResult.stdout.trim(), 10) || 0;
           const handle = await context.writeResource("state", g.nodeHost, {

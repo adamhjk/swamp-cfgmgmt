@@ -1,5 +1,11 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFile } from "./_lib/ssh.ts";
+import {
+  exec,
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFile,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   name: z.string().describe("Unique identifier for this cron job"),
@@ -63,9 +69,10 @@ const MARKER_PREFIX = "# cfgmgmt:";
 
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const result = await exec(
+  const result = await execSudo(
     client,
-    wrapSudo(`crontab -l -u ${JSON.stringify(g.user)} 2>/dev/null`, so),
+    `crontab -l -u ${shellEscape(g.user)} 2>/dev/null`,
+    so,
   );
   const lines = result.stdout.split("\n");
   const marker = `${MARKER_PREFIX}${g.name}`;
@@ -125,7 +132,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -195,12 +204,10 @@ export const model = {
           const so = sudoOpts(g);
           const marker = `${MARKER_PREFIX}${g.name}`;
 
-          const existing = await exec(
+          const existing = await execSudo(
             client,
-            wrapSudo(
-              `crontab -l -u ${JSON.stringify(g.user)} 2>/dev/null`,
-              so,
-            ),
+            `crontab -l -u ${shellEscape(g.user)} 2>/dev/null`,
+            so,
           );
           const lines = existing.stdout.split("\n");
 
@@ -235,12 +242,10 @@ export const model = {
 
           const tmpFile = `/tmp/.cfgmgmt-cron-${crypto.randomUUID()}`;
           await writeFile(client, tmpFile, content);
-          const result = await exec(
+          const result = await execSudo(
             client,
-            wrapSudo(
-              `crontab -u ${JSON.stringify(g.user)} ${tmpFile}`,
-              so,
-            ),
+            `crontab -u ${shellEscape(g.user)} ${tmpFile}`,
+            so,
           );
           await exec(client, `rm -f ${tmpFile}`);
           if (result.exitCode !== 0) {

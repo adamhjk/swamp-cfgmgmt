@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   username: z.string().describe("Username to manage"),
@@ -68,14 +68,10 @@ function connect(g) {
 
 async function gather(client, username, g) {
   const so = sudoOpts(g);
-  const pw = await exec(
+  const pw = await execSudo(
     client,
-    wrapSudo(
-      `getent passwd ${
-        JSON.stringify(username)
-      } 2>/dev/null || echo 'NOTFOUND'`,
-      so,
-    ),
+    `getent passwd ${shellEscape(username)} 2>/dev/null || echo 'NOTFOUND'`,
+    so,
   );
   const line = pw.stdout.trim();
   if (line === "NOTFOUND" || !line) {
@@ -94,15 +90,17 @@ async function gather(client, username, g) {
   const home = parts[5];
   const shell = parts[6];
 
-  const primaryGroup = await exec(
+  const primaryGroup = await execSudo(
     client,
-    wrapSudo(`id -gn ${JSON.stringify(username)} 2>/dev/null`, so),
+    `id -gn ${shellEscape(username)} 2>/dev/null`,
+    so,
   );
   const primaryGroupName = primaryGroup.stdout.trim();
 
-  const allGroups = await exec(
+  const allGroups = await execSudo(
     client,
-    wrapSudo(`id -nG ${JSON.stringify(username)} 2>/dev/null`, so),
+    `id -nG ${shellEscape(username)} 2>/dev/null`,
+    so,
   );
   const groupList = allGroups.stdout.trim().split(/\s+/).filter((g) =>
     g && g !== primaryGroupName
@@ -169,7 +167,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -240,12 +240,10 @@ export const model = {
 
           if (g.ensure === "absent") {
             const flags = g.managehome ? "-r" : "";
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(
-                `userdel ${flags} ${JSON.stringify(g.username)}`,
-                so,
-              ),
+              `userdel ${flags} ${shellEscape(g.username)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`userdel failed: ${result.stderr}`);
@@ -255,16 +253,17 @@ export const model = {
             if (g.uid !== undefined) args.push("-u", String(g.uid));
             if (g.gid !== undefined) args.push("-g", String(g.gid));
             if (g.groups !== undefined && g.groups.length > 0) {
-              args.push("-G", g.groups.join(","));
+              args.push("-G", shellEscape(g.groups.join(",")));
             }
-            if (g.home !== undefined) args.push("-d", g.home);
-            if (g.shell !== undefined) args.push("-s", g.shell);
+            if (g.home !== undefined) args.push("-d", shellEscape(g.home));
+            if (g.shell !== undefined) args.push("-s", shellEscape(g.shell));
             if (g.system) args.push("-r");
             if (g.managehome) args.push("-m");
-            args.push(g.username);
-            const result = await exec(
+            args.push(shellEscape(g.username));
+            const result = await execSudo(
               client,
-              wrapSudo(`useradd ${args.join(" ")}`, so),
+              `useradd ${args.join(" ")}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`useradd failed: ${result.stderr}`);
@@ -278,20 +277,21 @@ export const model = {
               args.push("-g", String(g.gid));
             }
             if (g.groups !== undefined) {
-              args.push("-G", g.groups.join(","));
+              args.push("-G", shellEscape(g.groups.join(",")));
             }
             if (g.home !== undefined && current.home !== g.home) {
-              args.push("-d", g.home);
+              args.push("-d", shellEscape(g.home));
               if (g.managehome) args.push("-m");
             }
             if (g.shell !== undefined && current.shell !== g.shell) {
-              args.push("-s", g.shell);
+              args.push("-s", shellEscape(g.shell));
             }
             if (args.length > 0) {
-              args.push(g.username);
-              const result = await exec(
+              args.push(shellEscape(g.username));
+              const result = await execSudo(
                 client,
-                wrapSudo(`usermod ${args.join(" ")}`, so),
+                `usermod ${args.join(" ")}`,
+                so,
               );
               if (result.exitCode !== 0) {
                 throw new Error(`usermod failed: ${result.stderr}`);

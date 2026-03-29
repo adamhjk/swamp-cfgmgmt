@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   name: z.string().describe("Kernel module name (e.g. br_netfilter, overlay)"),
@@ -69,19 +74,18 @@ function persistPath(name) {
 async function gather(client, g) {
   const so = sudoOpts(g);
 
-  const lsmodResult = await exec(
+  const lsmodResult = await execSudo(
     client,
-    wrapSudo(
-      `lsmod | grep -qw ${JSON.stringify(g.name)} && echo Y || echo N`,
-      so,
-    ),
+    `lsmod | grep -qw ${shellEscape(g.name)} && echo Y || echo N`,
+    so,
   );
   const loaded = lsmodResult.stdout.trim() === "Y";
 
   const path = persistPath(g.name);
-  const fileResult = await exec(
+  const fileResult = await execSudo(
     client,
-    wrapSudo(`test -f ${JSON.stringify(path)} && echo Y || echo N`, so),
+    `test -f ${shellEscape(path)} && echo Y || echo N`,
+    so,
   );
   const persisted = fileResult.stdout.trim() === "Y";
 
@@ -117,7 +121,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -187,9 +193,10 @@ export const model = {
           if (g.ensure === "present") {
             if (changes.includes("load module")) {
               const params = g.params || "";
-              const r = await exec(
+              const r = await execSudo(
                 client,
-                wrapSudo(`modprobe ${JSON.stringify(g.name)} ${params}`, so),
+                `modprobe ${shellEscape(g.name)} ${params}`,
+                so,
               );
               if (r.exitCode !== 0) {
                 throw new Error(`modprobe failed: ${r.stderr}`);
@@ -201,9 +208,10 @@ export const model = {
             }
           } else {
             if (changes.includes("unload module")) {
-              const r = await exec(
+              const r = await execSudo(
                 client,
-                wrapSudo(`rmmod ${JSON.stringify(g.name)}`, so),
+                `rmmod ${shellEscape(g.name)}`,
+                so,
               );
               if (r.exitCode !== 0) {
                 throw new Error(`rmmod failed: ${r.stderr}`);
@@ -211,9 +219,10 @@ export const model = {
             }
             if (changes.includes("remove persistence file")) {
               const path = persistPath(g.name);
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`rm -f ${JSON.stringify(path)}`, so),
+                `rm -f ${shellEscape(path)}`,
+                so,
               );
             }
           }

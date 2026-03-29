@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   user: z.string().describe("User whose authorized_keys file to manage"),
@@ -64,12 +69,10 @@ function keyBody(key: string): string {
 
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const homeResult = await exec(
+  const homeResult = await execSudo(
     client,
-    wrapSudo(
-      `getent passwd ${JSON.stringify(g.user)} | cut -d: -f6`,
-      so,
-    ),
+    `getent passwd ${shellEscape(g.user)} | cut -d: -f6`,
+    so,
   );
   const home = homeResult.stdout.trim();
   if (!home) {
@@ -77,9 +80,10 @@ async function gather(client, g) {
   }
 
   const akPath = `${home}/.ssh/authorized_keys`;
-  const catResult = await exec(
+  const catResult = await execSudo(
     client,
-    wrapSudo(`cat ${JSON.stringify(akPath)} 2>/dev/null`, so),
+    `cat ${shellEscape(akPath)} 2>/dev/null`,
+    so,
   );
   const fileExists = catResult.exitCode === 0;
   const body = keyBody(g.key);
@@ -117,7 +121,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -191,44 +197,43 @@ export const model = {
           const sshDir = akPath.substring(0, akPath.lastIndexOf("/"));
 
           if (g.ensure === "present") {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(
-                `mkdir -p ${JSON.stringify(sshDir)} && chmod 700 ${
-                  JSON.stringify(sshDir)
-                }`,
-                so,
-              ),
+              `mkdir -p ${shellEscape(sshDir)} && chmod 700 ${
+                shellEscape(sshDir)
+              }`,
+              so,
             );
             let content = "";
             if (current.fileExists) {
-              const existing = await exec(
+              const existing = await execSudo(
                 client,
-                wrapSudo(`cat ${JSON.stringify(akPath)}`, so),
+                `cat ${shellEscape(akPath)}`,
+                so,
               );
               content = existing.stdout;
               if (content && !content.endsWith("\n")) content += "\n";
             }
             content += g.key.trim() + "\n";
             await writeFileAs(client, akPath, content, so);
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`chmod 600 ${JSON.stringify(akPath)}`, so),
+              `chmod 600 ${shellEscape(akPath)}`,
+              so,
             );
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(
-                `chown ${JSON.stringify(g.user + ":" + g.user)} ${
-                  JSON.stringify(sshDir)
-                } ${JSON.stringify(akPath)}`,
-                so,
-              ),
+              `chown ${shellEscape(g.user + ":" + g.user)} ${
+                shellEscape(sshDir)
+              } ${shellEscape(akPath)}`,
+              so,
             );
           } else {
             const body = keyBody(g.key);
-            const existing = await exec(
+            const existing = await execSudo(
               client,
-              wrapSudo(`cat ${JSON.stringify(akPath)}`, so),
+              `cat ${shellEscape(akPath)}`,
+              so,
             );
             const filtered = existing.stdout.split("\n")
               .filter((line) => !line.includes(body))

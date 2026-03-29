@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   image: z.string().describe("Docker image name with tag (e.g. nginx:1.25)"),
@@ -60,22 +60,21 @@ function connect(g) {
 async function gather(client, g) {
   const so = sudoOpts(g);
 
-  const dockerCheck = await exec(
+  const dockerCheck = await execSudo(
     client,
-    wrapSudo(`command -v docker`, so),
+    `command -v docker`,
+    so,
   );
   if (dockerCheck.exitCode !== 0) {
     throw new Error("Docker is not installed");
   }
 
-  const result = await exec(
+  const result = await execSudo(
     client,
-    wrapSudo(
-      `docker image inspect ${
-        JSON.stringify(g.image)
-      } --format '{{.Id}}|||{{json .RepoTags}}|||{{.Created}}|||{{.Size}}' 2>/dev/null`,
-      so,
-    ),
+    `docker image inspect ${
+      shellEscape(g.image)
+    } --format '{{.Id}}|||{{json .RepoTags}}|||{{.Created}}|||{{.Size}}' 2>/dev/null`,
+    so,
   );
 
   if (result.exitCode !== 0) {
@@ -142,7 +141,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -212,17 +213,19 @@ export const model = {
           const so = sudoOpts(g);
 
           if (g.ensure === "absent") {
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(`docker rmi ${JSON.stringify(g.image)}`, so),
+              `docker rmi ${shellEscape(g.image)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`docker rmi failed: ${result.stderr}`);
             }
           } else {
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(`docker pull ${JSON.stringify(g.image)}`, so),
+              `docker pull ${shellEscape(g.image)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`docker pull failed: ${result.stderr}`);
@@ -262,9 +265,10 @@ export const model = {
         try {
           const client = await connect(g);
           const so = sudoOpts(g);
-          const result = await exec(
+          const result = await execSudo(
             client,
-            wrapSudo(`docker image prune -f`, so),
+            `docker image prune -f`,
+            so,
           );
           const current = await gather(client, g);
           const failed = result.exitCode !== 0;

@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   path: z.string().describe("Absolute path of the directory"),
@@ -8,9 +8,10 @@ const GlobalArgsSchema = z.object({
   ),
   owner: z.string().optional().describe("Directory owner"),
   group: z.string().optional().describe("Directory group"),
-  mode: z.string().optional().describe(
-    "Directory permissions in octal (e.g. 0755)",
-  ),
+  mode: z.string().regex(/^[0-7]{3,4}$/, "Mode must be 3-4 octal digits")
+    .optional().describe(
+      "Directory permissions in octal (e.g. 0755)",
+    ),
   nodeHost: z.string().describe("Hostname or IP of the remote node"),
   nodeUser: z.string().default("root").describe("SSH username"),
   nodePort: z.number().default(22).describe("SSH port"),
@@ -61,14 +62,10 @@ function connect(g) {
 
 async function gather(client, path, g) {
   const so = sudoOpts(g);
-  const statResult = await exec(
+  const statResult = await execSudo(
     client,
-    wrapSudo(
-      `stat -c '%F|%U|%G|%a' ${
-        JSON.stringify(path)
-      } 2>/dev/null || echo 'NOTFOUND'`,
-      so,
-    ),
+    `stat -c '%F|%U|%G|%a' ${shellEscape(path)} 2>/dev/null || echo 'NOTFOUND'`,
+    so,
   );
   const line = statResult.stdout.trim();
   if (line === "NOTFOUND") {
@@ -136,7 +133,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -211,33 +210,32 @@ export const model = {
 
           const so = sudoOpts(g);
           if (g.ensure === "absent") {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`rm -rf ${JSON.stringify(g.path)}`, so),
+              `rm -rf ${shellEscape(g.path)}`,
+              so,
             );
           } else {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`mkdir -p ${JSON.stringify(g.path)}`, so),
+              `mkdir -p ${shellEscape(g.path)}`,
+              so,
             );
             if (g.owner || g.group) {
               const ownership = g.group
                 ? `${g.owner || ""}:${g.group}`
                 : g.owner;
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(
-                  `chown ${JSON.stringify(ownership)} ${
-                    JSON.stringify(g.path)
-                  }`,
-                  so,
-                ),
+                `chown ${shellEscape(ownership)} ${shellEscape(g.path)}`,
+                so,
               );
             }
             if (g.mode) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`chmod ${g.mode} ${JSON.stringify(g.path)}`, so),
+                `chmod ${g.mode} ${shellEscape(g.path)}`,
+                so,
               );
             }
           }

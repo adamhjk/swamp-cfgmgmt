@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   service: z.string().describe("Service name (e.g. nginx or nginx.service)"),
@@ -70,14 +75,12 @@ function unitFilePath(service) {
 }
 
 async function gather(client, service, g) {
-  const result = await exec(
+  const result = await execSudo(
     client,
-    wrapSudo(
-      `systemctl show ${
-        JSON.stringify(service)
-      } --property=LoadState,ActiveState,UnitFileState --no-pager`,
-      sudoOpts(g),
-    ),
+    `systemctl show ${
+      shellEscape(service)
+    } --property=LoadState,ActiveState,UnitFileState --no-pager`,
+    sudoOpts(g),
   );
   const props = new Map();
   for (const line of result.stdout.split("\n")) {
@@ -98,9 +101,10 @@ async function detectChanges(client, g, current) {
 
   if (g.unitFile !== undefined) {
     const path = unitFilePath(g.service);
-    const result = await exec(
+    const result = await execSudo(
       client,
-      wrapSudo(`cat ${JSON.stringify(path)} 2>/dev/null`, sudoOpts(g)),
+      `cat ${shellEscape(path)} 2>/dev/null`,
+      sudoOpts(g),
     );
     if (result.exitCode !== 0) {
       changes.push("create unit file");
@@ -141,7 +145,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -221,9 +227,10 @@ export const model = {
           ) {
             const path = unitFilePath(g.service);
             await writeFileAs(client, path, g.unitFile, so);
-            const reload = await exec(
+            const reload = await execSudo(
               client,
-              wrapSudo("systemctl daemon-reload", so),
+              "systemctl daemon-reload",
+              so,
             );
             if (reload.exitCode !== 0) {
               errors.push(`daemon-reload: ${reload.stderr}`);
@@ -231,29 +238,33 @@ export const model = {
           }
 
           if (changes.includes("enable service")) {
-            const r = await exec(
+            const r = await execSudo(
               client,
-              wrapSudo(`systemctl enable ${JSON.stringify(g.service)}`, so),
+              `systemctl enable ${shellEscape(g.service)}`,
+              so,
             );
             if (r.exitCode !== 0) errors.push(`enable: ${r.stderr}`);
           } else if (changes.includes("disable service")) {
-            const r = await exec(
+            const r = await execSudo(
               client,
-              wrapSudo(`systemctl disable ${JSON.stringify(g.service)}`, so),
+              `systemctl disable ${shellEscape(g.service)}`,
+              so,
             );
             if (r.exitCode !== 0) errors.push(`disable: ${r.stderr}`);
           }
 
           if (changes.includes("start service")) {
-            const r = await exec(
+            const r = await execSudo(
               client,
-              wrapSudo(`systemctl start ${JSON.stringify(g.service)}`, so),
+              `systemctl start ${shellEscape(g.service)}`,
+              so,
             );
             if (r.exitCode !== 0) errors.push(`start: ${r.stderr}`);
           } else if (changes.includes("stop service")) {
-            const r = await exec(
+            const r = await execSudo(
               client,
-              wrapSudo(`systemctl stop ${JSON.stringify(g.service)}`, so),
+              `systemctl stop ${shellEscape(g.service)}`,
+              so,
             );
             if (r.exitCode !== 0) errors.push(`stop: ${r.stderr}`);
           }
@@ -290,12 +301,10 @@ export const model = {
         const g = context.globalArgs;
         try {
           const client = await connect(g);
-          const result = await exec(
+          const result = await execSudo(
             client,
-            wrapSudo(
-              `systemctl restart ${JSON.stringify(g.service)}`,
-              sudoOpts(g),
-            ),
+            `systemctl restart ${shellEscape(g.service)}`,
+            sudoOpts(g),
           );
           const current = await gather(client, g.service, g);
 
@@ -334,14 +343,12 @@ export const model = {
         const g = context.globalArgs;
         try {
           const client = await connect(g);
-          const result = await exec(
+          const result = await execSudo(
             client,
-            wrapSudo(
-              `journalctl -u ${
-                JSON.stringify(g.service)
-              } --no-pager -n ${args.lines}`,
-              sudoOpts(g),
-            ),
+            `journalctl -u ${
+              shellEscape(g.service)
+            } --no-pager -n ${args.lines}`,
+            sudoOpts(g),
           );
 
           const handle = await context.writeResource("logs", g.nodeHost, {

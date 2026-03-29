@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, scpFileAs, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, scpFileAs, shellEscape } from "./_lib/ssh.ts";
 import { isAbsolute, join } from "jsr:@std/path@1";
 
 const GlobalArgsSchema = z.object({
@@ -12,7 +12,8 @@ const GlobalArgsSchema = z.object({
   ),
   owner: z.string().optional().describe("File owner"),
   group: z.string().optional().describe("File group"),
-  mode: z.string().optional().describe("File permissions in octal (e.g. 0644)"),
+  mode: z.string().regex(/^[0-7]{3,4}$/, "Mode must be 3-4 octal digits")
+    .optional().describe("File permissions in octal (e.g. 0644)"),
   nodeHost: z.string().describe("Hostname or IP of the remote node"),
   nodeUser: z.string().default("root").describe("SSH username"),
   nodePort: z.number().default(22).describe("SSH port"),
@@ -67,14 +68,10 @@ function connect(g) {
 
 async function gather(client, path, g) {
   const so = sudoOpts(g);
-  const statResult = await exec(
+  const statResult = await execSudo(
     client,
-    wrapSudo(
-      `stat -c '%F|%U|%G|%a' ${
-        JSON.stringify(path)
-      } 2>/dev/null || echo 'NOTFOUND'`,
-      so,
-    ),
+    `stat -c '%F|%U|%G|%a' ${shellEscape(path)} 2>/dev/null || echo 'NOTFOUND'`,
+    so,
   );
   const line = statResult.stdout.trim();
   if (line === "NOTFOUND") {
@@ -104,12 +101,10 @@ async function gather(client, path, g) {
 
   let contentSha256 = null;
   if (isFile) {
-    const hashResult = await exec(
+    const hashResult = await execSudo(
       client,
-      wrapSudo(
-        `sha256sum ${JSON.stringify(path)} 2>/dev/null | awk '{print $1}'`,
-        so,
-      ),
+      `sha256sum ${shellEscape(path)} 2>/dev/null | awk '{print $1}'`,
+      so,
     );
     contentSha256 = hashResult.stdout.trim() || null;
   }
@@ -134,7 +129,13 @@ async function computeLocalHash(filePath) {
 
 function resolveSource(source, repoDir) {
   if (isAbsolute(source)) return source;
-  return join(repoDir, source);
+  const resolved = join(repoDir, source);
+  if (!resolved.startsWith(repoDir)) {
+    throw new Error(
+      `Path traversal detected: source resolves to ${resolved} which is outside ${repoDir}`,
+    );
+  }
+  return resolved;
 }
 
 function detectChanges(g, current) {
@@ -184,7 +185,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -277,13 +280,14 @@ export const model = {
 
           const so = sudoOpts(g);
           if (g.ensure === "absent") {
-            await exec(client, wrapSudo(`rm -f ${JSON.stringify(g.path)}`, so));
+            await execSudo(client, `rm -f ${shellEscape(g.path)}`, so);
           } else {
             const dir = g.path.substring(0, g.path.lastIndexOf("/"));
             if (dir) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`mkdir -p ${JSON.stringify(dir)}`, so),
+                `mkdir -p ${shellEscape(dir)}`,
+                so,
               );
             }
             await scpFileAs(client, sourcePath, g.path, so);
@@ -291,20 +295,17 @@ export const model = {
               const ownership = g.group
                 ? `${g.owner || ""}:${g.group}`
                 : g.owner;
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(
-                  `chown ${JSON.stringify(ownership)} ${
-                    JSON.stringify(g.path)
-                  }`,
-                  so,
-                ),
+                `chown ${shellEscape(ownership)} ${shellEscape(g.path)}`,
+                so,
               );
             }
             if (g.mode) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`chmod ${g.mode} ${JSON.stringify(g.path)}`, so),
+                `chmod ${g.mode} ${shellEscape(g.path)}`,
+                so,
               );
             }
           }

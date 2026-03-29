@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   name: z.string().describe(
@@ -113,45 +118,37 @@ async function hashContent(content) {
 }
 
 async function fileHash(client, path, so) {
-  const r = await exec(
+  const r = await execSudo(
     client,
-    wrapSudo(
-      `sha256sum ${JSON.stringify(path)} 2>/dev/null | awk '{print $1}'`,
-      so,
-    ),
+    `sha256sum ${shellEscape(path)} 2>/dev/null | awk '{print $1}'`,
+    so,
   );
   return r.exitCode === 0 && r.stdout.trim() ? r.stdout.trim() : null;
 }
 
 async function fileExists(client, path, so) {
-  const r = await exec(
+  const r = await execSudo(
     client,
-    wrapSudo(
-      `test -f ${JSON.stringify(path)} && echo Y || echo N`,
-      so,
-    ),
+    `test -f ${shellEscape(path)} && echo Y || echo N`,
+    so,
   );
   return r.stdout.trim() === "Y";
 }
 
 async function checkCertKeyMatch(client, certPath, keyPath, so) {
-  const certMod = await exec(
+  const certMod = await execSudo(
     client,
-    wrapSudo(
-      `openssl x509 -noout -modulus -in ${
-        JSON.stringify(certPath)
-      } 2>/dev/null | openssl md5`,
-      so,
-    ),
+    `openssl x509 -noout -modulus -in ${
+      shellEscape(certPath)
+    } 2>/dev/null | openssl md5`,
+    so,
   );
-  const keyMod = await exec(
+  const keyMod = await execSudo(
     client,
-    wrapSudo(
-      `openssl rsa -noout -modulus -in ${
-        JSON.stringify(keyPath)
-      } 2>/dev/null | openssl md5`,
-      so,
-    ),
+    `openssl rsa -noout -modulus -in ${
+      shellEscape(keyPath)
+    } 2>/dev/null | openssl md5`,
+    so,
   );
   if (certMod.exitCode !== 0 || keyMod.exitCode !== 0) return null;
   return certMod.stdout.trim() === keyMod.stdout.trim();
@@ -221,18 +218,16 @@ async function deployFile(client, path, content, mode, g) {
   const so = sudoOpts(g);
   const dir = path.substring(0, path.lastIndexOf("/"));
   if (dir) {
-    await exec(client, wrapSudo(`mkdir -p ${JSON.stringify(dir)}`, so));
+    await execSudo(client, `mkdir -p ${shellEscape(dir)}`, so);
   }
   await writeFileAs(client, path, content, so);
-  await exec(client, wrapSudo(`chmod ${mode} ${JSON.stringify(path)}`, so));
+  await execSudo(client, `chmod ${mode} ${shellEscape(path)}`, so);
   if (g.owner || g.group) {
     const ownership = g.group ? `${g.owner || ""}:${g.group}` : g.owner;
-    await exec(
+    await execSudo(
       client,
-      wrapSudo(
-        `chown ${JSON.stringify(ownership)} ${JSON.stringify(path)}`,
-        so,
-      ),
+      `chown ${shellEscape(ownership)} ${shellEscape(path)}`,
+      so,
     );
   }
 }
@@ -250,7 +245,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {

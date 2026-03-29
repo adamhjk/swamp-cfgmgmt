@@ -6,6 +6,7 @@ export interface SshConn {
   username: string;
   identityFile?: string;
   socketPath: string;
+  strictHostKeyChecking: string;
 }
 
 const POOL_KEY = "__cfgmgmt_ssh_pool";
@@ -37,6 +38,7 @@ export interface ConnectOpts {
   port?: number;
   username: string;
   privateKeyPath?: string;
+  strictHostKeyChecking?: string;
 }
 
 async function checkMaster(
@@ -75,6 +77,7 @@ async function _establishConnection(
   port: number,
 ): Promise<SshConn> {
   const target = `${opts.username}@${opts.host}`;
+  const hostKeyCheck = opts.strictHostKeyChecking ?? "accept-new";
   const existing = pool().get(key);
   if (existing && await checkMaster(existing.socketPath, target)) {
     return existing;
@@ -82,7 +85,8 @@ async function _establishConnection(
   pool().delete(key);
 
   try {
-    await Deno.mkdir(SOCKET_DIR, { recursive: true });
+    await Deno.mkdir(SOCKET_DIR, { recursive: true, mode: 0o700 });
+    await Deno.chmod(SOCKET_DIR, 0o700).catch(() => {});
   } catch {
     // already exists
   }
@@ -94,6 +98,7 @@ async function _establishConnection(
     username: opts.username,
     identityFile: opts.privateKeyPath,
     socketPath,
+    strictHostKeyChecking: hostKeyCheck,
   };
 
   if (await checkMaster(socketPath, target)) {
@@ -108,11 +113,11 @@ async function _establishConnection(
     "-o",
     `ControlPath=${socketPath}`,
     "-o",
-    "ControlPersist=3600",
+    "ControlPersist=600",
     "-p",
     String(port),
     "-o",
-    "StrictHostKeyChecking=no",
+    `StrictHostKeyChecking=${hostKeyCheck}`,
     "-o",
     "BatchMode=yes",
     "-o",
@@ -163,6 +168,7 @@ export interface ExecResult {
 export async function exec(
   conn: SshConn,
   command: string,
+  opts?: { stdinData?: string },
 ): Promise<ExecResult> {
   const args = [
     "-o",
@@ -170,12 +176,30 @@ export async function exec(
     "-p",
     String(conn.port),
     "-o",
-    "StrictHostKeyChecking=no",
+    `StrictHostKeyChecking=${conn.strictHostKeyChecking}`,
     "-o",
     "BatchMode=yes",
   ];
   if (conn.identityFile) args.push("-i", conn.identityFile);
   args.push(`${conn.username}@${conn.host}`, command);
+
+  if (opts?.stdinData) {
+    const proc = new Deno.Command("ssh", {
+      args,
+      stdin: "piped",
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+    const writer = proc.stdin.getWriter();
+    await writer.write(new TextEncoder().encode(opts.stdinData));
+    await writer.close();
+    const output = await proc.output();
+    return {
+      stdout: new TextDecoder().decode(output.stdout),
+      stderr: new TextDecoder().decode(output.stderr),
+      exitCode: output.code,
+    };
+  }
 
   const cmd = new Deno.Command("ssh", {
     args,
@@ -204,7 +228,7 @@ export async function writeFile(
       "-P",
       String(conn.port),
       "-o",
-      "StrictHostKeyChecking=no",
+      `StrictHostKeyChecking=${conn.strictHostKeyChecking}`,
       "-o",
       "BatchMode=yes",
     ];
@@ -232,19 +256,29 @@ export interface BecomeOpts {
   becomePassword?: string;
 }
 
-function shellEscape(s: string): string {
+export function shellEscape(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
 }
 
-export function wrapSudo(command: string, opts?: BecomeOpts): string {
-  if (!opts?.become) return command;
+export function execSudo(
+  conn: SshConn,
+  command: string,
+  opts?: BecomeOpts,
+): Promise<ExecResult> {
+  if (!opts?.become) return exec(conn, command);
   const user = opts.becomeUser || "root";
   const escaped = shellEscape(command);
   if (opts.becomePassword) {
-    const pw = shellEscape(opts.becomePassword);
-    return `echo ${pw} | sudo -S -p '' -u ${user} -- sh -c ${escaped}`;
+    return exec(
+      conn,
+      `sudo -S -p '' -u ${shellEscape(user)} -- sh -c ${escaped}`,
+      { stdinData: opts.becomePassword + "\n" },
+    );
   }
-  return `sudo -n -u ${user} -- sh -c ${escaped}`;
+  return exec(
+    conn,
+    `sudo -n -u ${shellEscape(user)} -- sh -c ${escaped}`,
+  );
 }
 
 export async function writeFileAs(
@@ -258,11 +292,11 @@ export async function writeFileAs(
   }
   const tmpName = `/tmp/.swamp-upload-${crypto.randomUUID()}`;
   await writeFile(conn, tmpName, content);
-  const mv = wrapSudo(
+  const result = await execSudo(
+    conn,
     `mv ${shellEscape(tmpName)} ${shellEscape(remotePath)}`,
     opts,
   );
-  const result = await exec(conn, mv);
   if (result.exitCode !== 0) {
     await exec(conn, `rm -f ${shellEscape(tmpName)}`);
     throw new Error(`writeFileAs mv to ${remotePath} failed: ${result.stderr}`);
@@ -280,7 +314,7 @@ export async function scpFile(
     "-P",
     String(conn.port),
     "-o",
-    "StrictHostKeyChecking=no",
+    `StrictHostKeyChecking=${conn.strictHostKeyChecking}`,
     "-o",
     "BatchMode=yes",
   ];
@@ -310,11 +344,11 @@ export async function scpFileAs(
   }
   const tmpName = `/tmp/.swamp-upload-${crypto.randomUUID()}`;
   await scpFile(conn, localPath, tmpName);
-  const mv = wrapSudo(
+  const result = await execSudo(
+    conn,
     `mv ${shellEscape(tmpName)} ${shellEscape(remotePath)}`,
     opts,
   );
-  const result = await exec(conn, mv);
   if (result.exitCode !== 0) {
     await exec(conn, `rm -f ${shellEscape(tmpName)}`);
     throw new Error(

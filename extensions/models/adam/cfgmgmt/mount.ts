@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   path: z.string().describe("Mount point path"),
@@ -69,14 +74,12 @@ function connect(g) {
 async function gather(client, g) {
   const so = sudoOpts(g);
 
-  const findmnt = await exec(
+  const findmnt = await execSudo(
     client,
-    wrapSudo(
-      `findmnt -n -o SOURCE,FSTYPE,OPTIONS --target ${
-        JSON.stringify(g.path)
-      } 2>/dev/null`,
-      so,
-    ),
+    `findmnt -n -o SOURCE,FSTYPE,OPTIONS --target ${
+      shellEscape(g.path)
+    } 2>/dev/null`,
+    so,
   );
   let mounted = false;
   let mountDevice: string | null = null;
@@ -86,12 +89,10 @@ async function gather(client, g) {
   if (findmnt.exitCode === 0 && findmnt.stdout.trim()) {
     const parts = findmnt.stdout.trim().split(/\s+/);
     if (parts.length >= 3) {
-      const mountTarget = await exec(
+      const mountTarget = await execSudo(
         client,
-        wrapSudo(
-          `findmnt -n -o TARGET --target ${JSON.stringify(g.path)} 2>/dev/null`,
-          so,
-        ),
+        `findmnt -n -o TARGET --target ${shellEscape(g.path)} 2>/dev/null`,
+        so,
       );
       if (mountTarget.stdout.trim() === g.path) {
         mounted = true;
@@ -102,9 +103,10 @@ async function gather(client, g) {
     }
   }
 
-  const fstabResult = await exec(
+  const fstabResult = await execSudo(
     client,
-    wrapSudo(`cat /etc/fstab 2>/dev/null`, so),
+    `cat /etc/fstab 2>/dev/null`,
+    so,
   );
   let fstabPresent = false;
   let fstabDevice: string | null = null;
@@ -198,7 +200,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -271,9 +275,10 @@ export const model = {
           if (
             changes.includes("unmount filesystem")
           ) {
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(`umount ${JSON.stringify(g.path)}`, so),
+              `umount ${shellEscape(g.path)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`umount failed: ${result.stderr}`);
@@ -282,9 +287,10 @@ export const model = {
 
           const fstabChanges = changes.some((c) => c.includes("fstab"));
           if (fstabChanges) {
-            const fstabResult = await exec(
+            const fstabResult = await execSudo(
               client,
-              wrapSudo(`cat /etc/fstab`, so),
+              `cat /etc/fstab`,
+              so,
             );
             const lines = fstabResult.stdout.split("\n");
             const filtered = lines.filter((line) => {
@@ -306,13 +312,15 @@ export const model = {
           }
 
           if (changes.includes("mount filesystem")) {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`mkdir -p ${JSON.stringify(g.path)}`, so),
+              `mkdir -p ${shellEscape(g.path)}`,
+              so,
             );
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(`mount ${JSON.stringify(g.path)}`, so),
+              `mount ${shellEscape(g.path)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`mount failed: ${result.stderr}`);

@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   mode: z.enum(["enforcing", "permissive", "disabled"]).optional().describe(
@@ -61,17 +61,19 @@ function connect(g) {
 async function gather(client, g) {
   const so = sudoOpts(g);
 
-  const cmdCheck = await exec(
+  const cmdCheck = await execSudo(
     client,
-    wrapSudo(`command -v getenforce`, so),
+    `command -v getenforce`,
+    so,
   );
   const selinuxInstalled = cmdCheck.exitCode === 0;
 
   let currentMode: string | null = null;
   if (selinuxInstalled) {
-    const getenforce = await exec(
+    const getenforce = await execSudo(
       client,
-      wrapSudo(`getenforce 2>/dev/null`, so),
+      `getenforce 2>/dev/null`,
+      so,
     );
     if (getenforce.exitCode === 0) {
       currentMode = getenforce.stdout.trim().toLowerCase();
@@ -80,12 +82,10 @@ async function gather(client, g) {
 
   let configMode: string | null = null;
   if (selinuxInstalled) {
-    const config = await exec(
+    const config = await execSudo(
       client,
-      wrapSudo(
-        `grep '^SELINUX=' /etc/selinux/config 2>/dev/null | head -1`,
-        so,
-      ),
+      `grep '^SELINUX=' /etc/selinux/config 2>/dev/null | head -1`,
+      so,
     );
     if (config.exitCode === 0 && config.stdout.trim()) {
       const match = config.stdout.match(/^SELINUX=(\S+)/);
@@ -95,9 +95,10 @@ async function gather(client, g) {
 
   let booleanCurrent: string | null = null;
   if (g.boolean && selinuxInstalled) {
-    const result = await exec(
+    const result = await execSudo(
       client,
-      wrapSudo(`getsebool ${JSON.stringify(g.boolean)} 2>/dev/null`, so),
+      `getsebool ${shellEscape(g.boolean)} 2>/dev/null`,
+      so,
     );
     if (result.exitCode === 0) {
       const parts = result.stdout.trim().split(/\s+/);
@@ -153,7 +154,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -252,9 +255,10 @@ export const model = {
               g.mode !== "disabled" && current.currentMode !== "disabled"
             ) {
               const enforce = g.mode === "enforcing" ? "1" : "0";
-              const result = await exec(
+              const result = await execSudo(
                 client,
-                wrapSudo(`setenforce ${enforce}`, so),
+                `setenforce ${enforce}`,
+                so,
               );
               if (result.exitCode !== 0) {
                 throw new Error(`setenforce failed: ${result.stderr}`);
@@ -262,12 +266,10 @@ export const model = {
             }
 
             if (current.configMode !== g.mode) {
-              const result = await exec(
+              const result = await execSudo(
                 client,
-                wrapSudo(
-                  `sed -i 's/^SELINUX=.*/SELINUX=${g.mode}/' /etc/selinux/config`,
-                  so,
-                ),
+                `sed -i 's/^SELINUX=.*/SELINUX=${g.mode}/' /etc/selinux/config`,
+                so,
               );
               if (result.exitCode !== 0) {
                 throw new Error(
@@ -285,12 +287,10 @@ export const model = {
           }
 
           if (g.boolean !== undefined && g.booleanValue !== undefined) {
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(
-                `setsebool -P ${JSON.stringify(g.boolean)} ${g.booleanValue}`,
-                so,
-              ),
+              `setsebool -P ${shellEscape(g.boolean)} ${g.booleanValue}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`setsebool failed: ${result.stderr}`);

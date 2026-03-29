@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   groupname: z.string().describe("Group name to manage"),
@@ -57,14 +57,10 @@ function connect(g) {
 
 async function gather(client, groupname, g) {
   const so = sudoOpts(g);
-  const result = await exec(
+  const result = await execSudo(
     client,
-    wrapSudo(
-      `getent group ${
-        JSON.stringify(groupname)
-      } 2>/dev/null || echo 'NOTFOUND'`,
-      so,
-    ),
+    `getent group ${shellEscape(groupname)} 2>/dev/null || echo 'NOTFOUND'`,
+    so,
   );
   const line = result.stdout.trim();
   if (line === "NOTFOUND" || !line) {
@@ -122,7 +118,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -192,9 +190,10 @@ export const model = {
           const so = sudoOpts(g);
 
           if (g.ensure === "absent") {
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(`groupdel ${JSON.stringify(g.groupname)}`, so),
+              `groupdel ${shellEscape(g.groupname)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`groupdel failed: ${result.stderr}`);
@@ -204,22 +203,21 @@ export const model = {
             if (g.gid !== undefined) args.push("-g", String(g.gid));
             if (g.system) args.push("-r");
             args.push(g.groupname);
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(`groupadd ${args.join(" ")}`, so),
+              `groupadd ${args.join(" ")}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`groupadd failed: ${result.stderr}`);
             }
             if (g.members !== undefined && g.members.length > 0) {
-              const memberResult = await exec(
+              const memberResult = await execSudo(
                 client,
-                wrapSudo(
-                  `gpasswd -M ${g.members.join(",")} ${
-                    JSON.stringify(g.groupname)
-                  }`,
-                  so,
-                ),
+                `gpasswd -M ${shellEscape(g.members.join(","))} ${
+                  shellEscape(g.groupname)
+                }`,
+                so,
               );
               if (memberResult.exitCode !== 0) {
                 throw new Error(
@@ -229,12 +227,10 @@ export const model = {
             }
           } else {
             if (g.gid !== undefined && current.gid !== g.gid) {
-              const result = await exec(
+              const result = await execSudo(
                 client,
-                wrapSudo(
-                  `groupmod -g ${g.gid} ${JSON.stringify(g.groupname)}`,
-                  so,
-                ),
+                `groupmod -g ${g.gid} ${shellEscape(g.groupname)}`,
+                so,
               );
               if (result.exitCode !== 0) {
                 throw new Error(`groupmod failed: ${result.stderr}`);
@@ -245,14 +241,12 @@ export const model = {
               const have = [...current.members].sort();
               if (JSON.stringify(desired) !== JSON.stringify(have)) {
                 const memberList = g.members.join(",");
-                const result = await exec(
+                const result = await execSudo(
                   client,
-                  wrapSudo(
-                    `gpasswd -M ${memberList || '""'} ${
-                      JSON.stringify(g.groupname)
-                    }`,
-                    so,
-                  ),
+                  `gpasswd -M ${shellEscape(memberList) || '""'} ${
+                    shellEscape(g.groupname)
+                  }`,
+                  so,
                 );
                 if (result.exitCode !== 0) {
                   throw new Error(

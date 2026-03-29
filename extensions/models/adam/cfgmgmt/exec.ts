@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   command: z.string().describe("The command to execute"),
@@ -56,13 +56,13 @@ async function shouldRun(
 ): Promise<{ run: boolean; reason: string | null }> {
   const so = sudoOpts(g);
   if (g.onlyIf !== undefined) {
-    const r = await exec(client, wrapSudo(g.onlyIf, so));
+    const r = await execSudo(client, g.onlyIf, so);
     if (r.exitCode !== 0) {
       return { run: false, reason: `onlyIf command exited ${r.exitCode}` };
     }
   }
   if (g.notIf !== undefined) {
-    const r = await exec(client, wrapSudo(g.notIf, so));
+    const r = await execSudo(client, g.notIf, so);
     if (r.exitCode === 0) {
       return { run: false, reason: `notIf command exited 0` };
     }
@@ -83,7 +83,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -150,7 +152,7 @@ export const model = {
             });
             return { dataHandles: [handle] };
           }
-          const result = await exec(client, wrapSudo(g.command, sudoOpts(g)));
+          const result = await execSudo(client, g.command, sudoOpts(g));
           const failed = result.exitCode !== 0;
           const handle = await context.writeResource("state", g.nodeHost, {
             command: g.command,

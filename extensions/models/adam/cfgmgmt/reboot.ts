@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   timeout: z.number().default(300).describe(
@@ -77,7 +77,7 @@ async function waitForSsh(g, timeoutSec) {
         "-o",
         "ConnectTimeout=5",
         "-o",
-        "StrictHostKeyChecking=no",
+        "StrictHostKeyChecking=accept-new",
         "-o",
         "BatchMode=yes",
         "-p",
@@ -117,7 +117,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -136,9 +138,10 @@ export const model = {
         const g = context.globalArgs;
         try {
           const client = await connect(g);
-          const uptimeResult = await exec(
+          const uptimeResult = await execSudo(
             client,
-            wrapSudo("uptime -s 2>/dev/null || uptime", sudoOpts(g)),
+            "uptime -s 2>/dev/null || uptime",
+            sudoOpts(g),
           );
           const handle = await context.writeResource("state", g.nodeHost, {
             status: "non_compliant",
@@ -172,20 +175,19 @@ export const model = {
           const so = sudoOpts(g);
 
           // Record pre-reboot uptime
-          const uptimeResult = await exec(
+          const uptimeResult = await execSudo(
             client,
-            wrapSudo("uptime -s 2>/dev/null || uptime", so),
+            "uptime -s 2>/dev/null || uptime",
+            so,
           );
           const preRebootUptime = uptimeResult.stdout.trim();
 
           // Trigger reboot — use nohup + sleep to give SSH time to return
-          const msg = JSON.stringify(g.message);
-          await exec(
+          const msg = shellEscape(g.message);
+          await execSudo(
             client,
-            wrapSudo(
-              `nohup sh -c 'sleep 1 && shutdown -r now ${msg}' >/dev/null 2>&1 &`,
-              so,
-            ),
+            `nohup sh -c 'sleep 1 && shutdown -r now ${msg}' >/dev/null 2>&1 &`,
+            so,
           );
 
           // Wait for the host to go down
@@ -208,9 +210,10 @@ export const model = {
           });
 
           // Run test command and get new uptime
-          const testResult = await exec(
+          const testResult = await execSudo(
             newClient,
-            wrapSudo(g.testCommand, so),
+            g.testCommand,
+            so,
           );
           if (testResult.exitCode !== 0) {
             throw new Error(
@@ -218,9 +221,10 @@ export const model = {
             );
           }
 
-          const newUptime = await exec(
+          const newUptime = await execSudo(
             newClient,
-            wrapSudo("uptime -s 2>/dev/null || uptime", so),
+            "uptime -s 2>/dev/null || uptime",
+            so,
           );
 
           const handle = await context.writeResource("state", g.nodeHost, {

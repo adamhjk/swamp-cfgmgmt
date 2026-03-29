@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   packages: z.array(z.string()).default([]).describe("Package names to manage"),
@@ -68,9 +68,10 @@ async function queryPackages(client, packages, g) {
   const so = sudoOpts(g);
   const results = [];
   for (const pkg of packages) {
-    const r = await exec(
+    const r = await execSudo(
       client,
-      wrapSudo(`rpm -q ${JSON.stringify(pkg)} 2>/dev/null`, so),
+      `rpm -q ${shellEscape(pkg)} 2>/dev/null`,
+      so,
     );
     if (r.exitCode === 0) {
       const version = r.stdout.trim().replace(new RegExp(`^${pkg}-`), "");
@@ -122,7 +123,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -208,9 +211,10 @@ export const model = {
 
           if (toInstall.length > 0) {
             const so = sudoOpts(g);
-            const r = await exec(
+            const r = await execSudo(
               client,
-              wrapSudo(`dnf install -y ${toInstall.join(" ")}`, so),
+              `dnf install -y ${toInstall.map(shellEscape).join(" ")}`,
+              so,
             );
             stdout += r.stdout;
             stderr += r.stderr;
@@ -232,9 +236,10 @@ export const model = {
 
           if (toRemove.length > 0) {
             const so = sudoOpts(g);
-            const r = await exec(
+            const r = await execSudo(
               client,
-              wrapSudo(`dnf remove -y ${toRemove.join(" ")}`, so),
+              `dnf remove -y ${toRemove.map(shellEscape).join(" ")}`,
+              so,
             );
             stdout += r.stdout;
             stderr += r.stderr;
@@ -285,7 +290,7 @@ export const model = {
         const g = context.globalArgs;
         try {
           const client = await connect(g);
-          const r = await exec(client, wrapSudo("dnf makecache", sudoOpts(g)));
+          const r = await execSudo(client, "dnf makecache", sudoOpts(g));
           const failed = r.exitCode !== 0;
           const handle = await context.writeResource("state", g.nodeHost, {
             status: failed ? "failed" : "applied",
@@ -325,7 +330,7 @@ export const model = {
         const g = context.globalArgs;
         try {
           const client = await connect(g);
-          const r = await exec(client, wrapSudo("dnf upgrade -y", sudoOpts(g)));
+          const r = await execSudo(client, "dnf upgrade -y", sudoOpts(g));
           const failed = r.exitCode !== 0;
           const handle = await context.writeResource("state", g.nodeHost, {
             status: failed ? "failed" : "applied",
@@ -365,12 +370,10 @@ export const model = {
         const g = context.globalArgs;
         try {
           const client = await connect(g);
-          const r = await exec(
+          const r = await execSudo(
             client,
-            wrapSudo(
-              "rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE}\\n'",
-              sudoOpts(g),
-            ),
+            "rpm -qa --qf '%{NAME} %{VERSION}-%{RELEASE}\\n'",
+            sudoOpts(g),
           );
           if (r.exitCode !== 0) {
             const errorMsg = `rpm -qa failed with exit code ${r.exitCode}`;

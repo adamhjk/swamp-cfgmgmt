@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   timezone: z.string().describe(
@@ -53,29 +58,26 @@ async function gather(client, g) {
   const so = sudoOpts(g);
 
   let tz: string | null = null;
-  const timedatectl = await exec(
+  const timedatectl = await execSudo(
     client,
-    wrapSudo(
-      `timedatectl show --property=Timezone --value 2>/dev/null`,
-      so,
-    ),
+    `timedatectl show --property=Timezone --value 2>/dev/null`,
+    so,
   );
   if (timedatectl.exitCode === 0 && timedatectl.stdout.trim()) {
     tz = timedatectl.stdout.trim();
   } else {
-    const etcTz = await exec(
+    const etcTz = await execSudo(
       client,
-      wrapSudo(`cat /etc/timezone 2>/dev/null`, so),
+      `cat /etc/timezone 2>/dev/null`,
+      so,
     );
     if (etcTz.exitCode === 0 && etcTz.stdout.trim()) {
       tz = etcTz.stdout.trim();
     } else {
-      const link = await exec(
+      const link = await execSudo(
         client,
-        wrapSudo(
-          `readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||'`,
-          so,
-        ),
+        `readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||'`,
+        so,
       );
       if (link.exitCode === 0 && link.stdout.trim()) {
         tz = link.stdout.trim();
@@ -83,7 +85,7 @@ async function gather(client, g) {
     }
   }
 
-  const offsetResult = await exec(client, wrapSudo(`date +%z`, so));
+  const offsetResult = await execSudo(client, `date +%z`, so);
   const utcOffset = offsetResult.stdout.trim() || null;
 
   return { timezone: tz, utcOffset };
@@ -114,7 +116,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -180,28 +184,25 @@ export const model = {
 
           const so = sudoOpts(g);
 
-          const validate = await exec(
+          const validate = await execSudo(
             client,
-            wrapSudo(
-              `test -f /usr/share/zoneinfo/${JSON.stringify(g.timezone)}`,
-              so,
-            ),
+            `test -f /usr/share/zoneinfo/${shellEscape(g.timezone)}`,
+            so,
           );
           if (validate.exitCode !== 0) {
             throw new Error(`Invalid timezone: ${g.timezone}`);
           }
 
-          const timedatectlCheck = await exec(
+          const timedatectlCheck = await execSudo(
             client,
-            wrapSudo("command -v timedatectl", so),
+            "command -v timedatectl",
+            so,
           );
           if (timedatectlCheck.exitCode === 0) {
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(
-                `timedatectl set-timezone ${JSON.stringify(g.timezone)}`,
-                so,
-              ),
+              `timedatectl set-timezone ${shellEscape(g.timezone)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(
@@ -209,14 +210,12 @@ export const model = {
               );
             }
           } else {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(
-                `ln -sf /usr/share/zoneinfo/${
-                  JSON.stringify(g.timezone)
-                } /etc/localtime`,
-                so,
-              ),
+              `ln -sf /usr/share/zoneinfo/${
+                shellEscape(g.timezone)
+              } /etc/localtime`,
+              so,
             );
             await writeFileAs(client, "/etc/timezone", g.timezone + "\n", so);
           }

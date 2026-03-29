@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   name: z.string().describe(
@@ -111,9 +116,10 @@ async function gather(client, g) {
   const so = sudoOpts(g);
   const path = repoFilePath(g);
 
-  const repoResult = await exec(
+  const repoResult = await execSudo(
     client,
-    wrapSudo(`cat ${JSON.stringify(path)} 2>/dev/null`, so),
+    `cat ${shellEscape(path)} 2>/dev/null`,
+    so,
   );
   const repoFileExists = repoResult.exitCode === 0;
   const repoContent = repoFileExists ? repoResult.stdout : null;
@@ -155,7 +161,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -228,9 +236,10 @@ export const model = {
             const content = buildRepoContent(g);
             await writeFileAs(client, path, content, so);
           } else {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`rm -f ${JSON.stringify(path)}`, so),
+              `rm -f ${shellEscape(path)}`,
+              so,
             );
           }
 

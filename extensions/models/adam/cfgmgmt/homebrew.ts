@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection } from "./_lib/ssh.ts";
+import { exec, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   packages: z.array(z.string()).default([]).describe("Formula names to manage"),
@@ -58,12 +58,12 @@ async function queryPackages(client, packages) {
   for (const pkg of packages) {
     const r = await exec(
       client,
-      `brew list --formula ${JSON.stringify(pkg)} 2>/dev/null`,
+      `brew list --formula ${shellEscape(pkg)} 2>/dev/null`,
     );
     if (r.exitCode === 0) {
       const v = await exec(
         client,
-        `brew list --formula --versions ${JSON.stringify(pkg)} 2>/dev/null`,
+        `brew list --formula --versions ${shellEscape(pkg)} 2>/dev/null`,
       );
       const version = v.exitCode === 0
         ? v.stdout.trim().split(/\s+/).slice(1).join(" ") || null
@@ -109,7 +109,9 @@ export const model = {
       "Accepted but ignored (brew forbids root)",
     ),
     becomeUser: z.string().optional().describe("Accepted but ignored"),
-    becomePassword: z.string().optional().describe("Accepted but ignored"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Accepted but ignored",
+    ),
   }),
   resources: {
     state: {

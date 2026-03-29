@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   url: z.string().describe("URL to download"),
@@ -10,11 +10,12 @@ const GlobalArgsSchema = z.object({
     "Expected checksum of the file (e.g. sha256:abc123...). Used for idempotency.",
   ),
   checksumType: z.enum(["sha256", "sha1", "md5"]).default("sha256").describe(
-    "Checksum algorithm to use",
+    "Checksum algorithm to use (md5 is deprecated, prefer sha256)",
   ),
   owner: z.string().optional().describe("File owner"),
   group: z.string().optional().describe("File group"),
-  mode: z.string().optional().describe("File permissions in octal (e.g. 0755)"),
+  mode: z.string().regex(/^[0-7]{3,4}$/, "Mode must be 3-4 octal digits")
+    .optional().describe("File permissions in octal (e.g. 0755)"),
   force: z.boolean().default(false).describe(
     "Re-download even if the file already exists and checksum matches",
   ),
@@ -91,14 +92,10 @@ function checksumCmd(type) {
 
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const statResult = await exec(
+  const statResult = await execSudo(
     client,
-    wrapSudo(
-      `stat -c '%U|%G|%a' ${
-        JSON.stringify(g.path)
-      } 2>/dev/null || echo 'NOTFOUND'`,
-      so,
-    ),
+    `stat -c '%U|%G|%a' ${shellEscape(g.path)} 2>/dev/null || echo 'NOTFOUND'`,
+    so,
   );
   const line = statResult.stdout.trim();
   if (line === "NOTFOUND") {
@@ -112,12 +109,10 @@ async function gather(client, g) {
   const [owner, group, mode] = parts;
   let checksum = null;
   const cmd = checksumCmd(g.checksumType);
-  const hashResult = await exec(
+  const hashResult = await execSudo(
     client,
-    wrapSudo(
-      `${cmd} ${JSON.stringify(g.path)} 2>/dev/null | awk '{print $1}'`,
-      so,
-    ),
+    `${cmd} ${shellEscape(g.path)} 2>/dev/null | awk '{print $1}'`,
+    so,
   );
   if (hashResult.exitCode === 0 && hashResult.stdout.trim()) {
     checksum = hashResult.stdout.trim();
@@ -174,7 +169,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -250,31 +247,34 @@ export const model = {
           if (needsDownload) {
             const dir = g.path.substring(0, g.path.lastIndexOf("/"));
             if (dir) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`mkdir -p ${JSON.stringify(dir)}`, so),
+                `mkdir -p ${shellEscape(dir)}`,
+                so,
               );
             }
 
             // Try curl first, fall back to wget
-            const curlCheck = await exec(
+            const curlCheck = await execSudo(
               client,
-              wrapSudo("command -v curl", so),
+              "command -v curl",
+              so,
             );
             let downloadCmd;
             if (curlCheck.exitCode === 0) {
-              downloadCmd = `curl -fsSL -o ${JSON.stringify(g.path)} ${
-                JSON.stringify(g.url)
+              downloadCmd = `curl -fsSL -o ${shellEscape(g.path)} ${
+                shellEscape(g.url)
               }`;
             } else {
-              downloadCmd = `wget -q -O ${JSON.stringify(g.path)} ${
-                JSON.stringify(g.url)
+              downloadCmd = `wget -q -O ${shellEscape(g.path)} ${
+                shellEscape(g.url)
               }`;
             }
 
-            const dlResult = await exec(
+            const dlResult = await execSudo(
               client,
-              wrapSudo(downloadCmd, so),
+              downloadCmd,
+              so,
             );
             if (dlResult.exitCode !== 0) {
               throw new Error(
@@ -285,18 +285,17 @@ export const model = {
             // Verify checksum after download
             if (g.checksum) {
               const cmd = checksumCmd(g.checksumType);
-              const hashResult = await exec(
+              const hashResult = await execSudo(
                 client,
-                wrapSudo(
-                  `${cmd} ${JSON.stringify(g.path)} | awk '{print $1}'`,
-                  so,
-                ),
+                `${cmd} ${shellEscape(g.path)} | awk '{print $1}'`,
+                so,
               );
               const actualChecksum = hashResult.stdout.trim();
               if (actualChecksum !== g.checksum) {
-                await exec(
+                await execSudo(
                   client,
-                  wrapSudo(`rm -f ${JSON.stringify(g.path)}`, so),
+                  `rm -f ${shellEscape(g.path)}`,
+                  so,
                 );
                 throw new Error(
                   `Checksum verification failed: expected ${g.checksum}, got ${actualChecksum}`,
@@ -308,18 +307,17 @@ export const model = {
           // Set ownership and permissions
           if (g.owner || g.group) {
             const ownership = g.group ? `${g.owner || ""}:${g.group}` : g.owner;
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(
-                `chown ${JSON.stringify(ownership)} ${JSON.stringify(g.path)}`,
-                so,
-              ),
+              `chown ${shellEscape(ownership)} ${shellEscape(g.path)}`,
+              so,
             );
           }
           if (g.mode) {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`chmod ${g.mode} ${JSON.stringify(g.path)}`, so),
+              `chmod ${g.mode} ${shellEscape(g.path)}`,
+              so,
             );
           }
 

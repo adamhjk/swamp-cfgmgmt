@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   path: z.string().describe("Path where the symlink should exist"),
@@ -59,22 +59,18 @@ function connect(g) {
 
 async function gather(client, path, g) {
   const so = sudoOpts(g);
-  const testResult = await exec(
+  const testResult = await execSudo(
     client,
-    wrapSudo(
-      `test -L ${JSON.stringify(path)} && echo ISLINK || echo NOTLINK`,
-      so,
-    ),
+    `test -L ${shellEscape(path)} && echo ISLINK || echo NOTLINK`,
+    so,
   );
   const isLink = testResult.stdout.trim() === "ISLINK";
 
   if (!isLink) {
-    const existsResult = await exec(
+    const existsResult = await execSudo(
       client,
-      wrapSudo(
-        `test -e ${JSON.stringify(path)} && echo EXISTS || echo NOTEXISTS`,
-        so,
-      ),
+      `test -e ${shellEscape(path)} && echo EXISTS || echo NOTEXISTS`,
+      so,
     );
     if (existsResult.stdout.trim() === "NOTEXISTS") {
       return {
@@ -85,9 +81,10 @@ async function gather(client, path, g) {
         group: null,
       };
     }
-    const statResult = await exec(
+    const statResult = await execSudo(
       client,
-      wrapSudo(`stat -c '%U|%G' ${JSON.stringify(path)} 2>/dev/null`, so),
+      `stat -c '%U|%G' ${shellEscape(path)} 2>/dev/null`,
+      so,
     );
     const parts1 = statResult.stdout.trim().split("|");
     const owner1 = parts1.length >= 2 ? parts1[0] || null : null;
@@ -101,15 +98,17 @@ async function gather(client, path, g) {
     };
   }
 
-  const targetResult = await exec(
+  const targetResult = await execSudo(
     client,
-    wrapSudo(`readlink ${JSON.stringify(path)}`, so),
+    `readlink ${shellEscape(path)}`,
+    so,
   );
   const linkTarget = targetResult.stdout.trim();
 
-  const statResult = await exec(
+  const statResult = await execSudo(
     client,
-    wrapSudo(`stat -c '%U|%G' ${JSON.stringify(path)} 2>/dev/null`, so),
+    `stat -c '%U|%G' ${shellEscape(path)} 2>/dev/null`,
+    so,
   );
   const parts2 = statResult.stdout.trim().split("|");
   const owner = parts2.length >= 2 ? parts2[0] || null : null;
@@ -153,7 +152,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -228,27 +229,21 @@ export const model = {
 
           const so = sudoOpts(g);
           if (g.ensure === "absent") {
-            await exec(client, wrapSudo(`rm -f ${JSON.stringify(g.path)}`, so));
+            await execSudo(client, `rm -f ${shellEscape(g.path)}`, so);
           } else {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(
-                `ln -sfn ${JSON.stringify(g.target)} ${JSON.stringify(g.path)}`,
-                so,
-              ),
+              `ln -sfn ${shellEscape(g.target)} ${shellEscape(g.path)}`,
+              so,
             );
             if (g.owner || g.group) {
               const ownership = g.group
                 ? `${g.owner || ""}:${g.group}`
                 : g.owner;
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(
-                  `chown -h ${JSON.stringify(ownership)} ${
-                    JSON.stringify(g.path)
-                  }`,
-                  so,
-                ),
+                `chown -h ${shellEscape(ownership)} ${shellEscape(g.path)}`,
+                so,
               );
             }
           }

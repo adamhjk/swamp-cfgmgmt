@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   name: z.string().describe("Desired system hostname"),
@@ -51,16 +56,15 @@ function connect(g) {
 
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const hostnameResult = await exec(
+  const hostnameResult = await execSudo(
     client,
-    wrapSudo(
-      `hostnamectl --static 2>/dev/null || hostname`,
-      so,
-    ),
+    `hostnamectl --static 2>/dev/null || hostname`,
+    so,
   );
-  const etcResult = await exec(
+  const etcResult = await execSudo(
     client,
-    wrapSudo(`cat /etc/hostname 2>/dev/null || echo ''`, so),
+    `cat /etc/hostname 2>/dev/null || echo ''`,
+    so,
   );
   return {
     hostname: hostnameResult.stdout.trim() || null,
@@ -96,7 +100,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -161,23 +167,23 @@ export const model = {
           }
 
           const so = sudoOpts(g);
-          const hostnamectlCheck = await exec(
+          const hostnamectlCheck = await execSudo(
             client,
-            wrapSudo("command -v hostnamectl", so),
+            "command -v hostnamectl",
+            so,
           );
           if (hostnamectlCheck.exitCode === 0) {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(
-                `hostnamectl set-hostname ${JSON.stringify(g.name)}`,
-                so,
-              ),
+              `hostnamectl set-hostname ${shellEscape(g.name)}`,
+              so,
             );
           } else {
             await writeFileAs(client, "/etc/hostname", g.name + "\n", so);
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`hostname ${JSON.stringify(g.name)}`, so),
+              `hostname ${shellEscape(g.name)}`,
+              so,
             );
           }
 

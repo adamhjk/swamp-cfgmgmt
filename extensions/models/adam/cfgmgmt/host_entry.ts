@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import { execSudo, getConnection, writeFileAs } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   hostname: z.string().describe("Primary hostname for the /etc/hosts entry"),
@@ -81,9 +81,10 @@ function parseHostsEntry(lines: string[], hostname: string) {
 
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const result = await exec(
+  const result = await execSudo(
     client,
-    wrapSudo(`cat /etc/hosts 2>/dev/null || echo ''`, so),
+    `cat /etc/hosts 2>/dev/null || echo ''`,
+    so,
   );
   const lines = result.stdout.split("\n");
   return parseHostsEntry(lines, g.hostname);
@@ -137,7 +138,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -208,9 +211,10 @@ export const model = {
           }
 
           const so = sudoOpts(g);
-          const hostsResult = await exec(
+          const hostsResult = await execSudo(
             client,
-            wrapSudo(`cat /etc/hosts 2>/dev/null || echo ''`, so),
+            `cat /etc/hosts 2>/dev/null || echo ''`,
+            so,
           );
           const lines = hostsResult.stdout.split("\n");
 

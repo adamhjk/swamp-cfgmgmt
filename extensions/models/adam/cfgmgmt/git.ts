@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   path: z.string().describe("Local path for the repository"),
@@ -70,11 +70,23 @@ function isCommitHash(rev: string): boolean {
   return /^[0-9a-f]{7,40}$/i.test(rev);
 }
 
+function stripCredentials(urlStr: string): string {
+  try {
+    const url = new URL(urlStr);
+    url.username = "";
+    url.password = "";
+    return url.toString();
+  } catch {
+    return urlStr;
+  }
+}
+
 async function gather(client, g) {
   const so = sudoOpts(g);
-  const existsResult = await exec(
+  const existsResult = await execSudo(
     client,
-    wrapSudo(`test -d ${JSON.stringify(g.path)} && echo Y || echo N`, so),
+    `test -d ${shellEscape(g.path)} && echo Y || echo N`,
+    so,
   );
   const exists = existsResult.stdout.trim() === "Y";
   if (!exists) {
@@ -89,22 +101,18 @@ async function gather(client, g) {
     };
   }
 
-  const gitCheck = await exec(
+  const gitCheck = await execSudo(
     client,
-    wrapSudo(
-      `test -d ${JSON.stringify(g.path + "/.git")} && echo Y || echo N`,
-      so,
-    ),
+    `test -d ${shellEscape(g.path + "/.git")} && echo Y || echo N`,
+    so,
   );
   const isGitRepo = gitCheck.stdout.trim() === "Y";
 
   if (!isGitRepo) {
-    const stat = await exec(
+    const stat = await execSudo(
       client,
-      wrapSudo(
-        `stat -c '%U|%G' ${JSON.stringify(g.path)} 2>/dev/null`,
-        so,
-      ),
+      `stat -c '%U|%G' ${shellEscape(g.path)} 2>/dev/null`,
+      so,
     );
     const parts1 = stat.stdout.trim().split("|");
     return {
@@ -118,30 +126,25 @@ async function gather(client, g) {
     };
   }
 
-  const commit = await exec(
+  const commit = await execSudo(
     client,
-    wrapSudo(`git -C ${JSON.stringify(g.path)} rev-parse HEAD 2>/dev/null`, so),
+    `git -C ${shellEscape(g.path)} rev-parse HEAD 2>/dev/null`,
+    so,
   );
-  const branch = await exec(
+  const branch = await execSudo(
     client,
-    wrapSudo(
-      `git -C ${JSON.stringify(g.path)} symbolic-ref --short HEAD 2>/dev/null`,
-      so,
-    ),
+    `git -C ${shellEscape(g.path)} symbolic-ref --short HEAD 2>/dev/null`,
+    so,
   );
-  const origin = await exec(
+  const origin = await execSudo(
     client,
-    wrapSudo(
-      `git -C ${JSON.stringify(g.path)} remote get-url origin 2>/dev/null`,
-      so,
-    ),
+    `git -C ${shellEscape(g.path)} remote get-url origin 2>/dev/null`,
+    so,
   );
-  const stat = await exec(
+  const stat = await execSudo(
     client,
-    wrapSudo(
-      `stat -c '%U|%G' ${JSON.stringify(g.path)} 2>/dev/null`,
-      so,
-    ),
+    `stat -c '%U|%G' ${shellEscape(g.path)} 2>/dev/null`,
+    so,
   );
   const parts2 = stat.stdout.trim().split("|");
 
@@ -150,7 +153,9 @@ async function gather(client, g) {
     isGitRepo: true,
     currentCommit: commit.exitCode === 0 ? commit.stdout.trim() : null,
     currentBranch: branch.exitCode === 0 ? branch.stdout.trim() : null,
-    originUrl: origin.exitCode === 0 ? origin.stdout.trim() : null,
+    originUrl: origin.exitCode === 0
+      ? stripCredentials(origin.stdout.trim())
+      : null,
     owner: parts2.length >= 2 ? parts2[0] || null : null,
     group: parts2.length >= 2 ? parts2[1] || null : null,
   };
@@ -230,7 +235,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -318,9 +325,10 @@ export const model = {
           const so = sudoOpts(g);
 
           if (g.ensure === "absent") {
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(`rm -rf ${JSON.stringify(g.path)}`, so),
+              `rm -rf ${shellEscape(g.path)}`,
+              so,
             );
           } else if (changes.includes("clone repository")) {
             const args = ["git", "clone"];
@@ -328,12 +336,13 @@ export const model = {
             if (
               g.revision !== "HEAD" && !isCommitHash(g.revision)
             ) {
-              args.push("--branch", g.revision);
+              args.push("--branch", shellEscape(g.revision));
             }
-            args.push(JSON.stringify(g.repo), JSON.stringify(g.path));
-            const result = await exec(
+            args.push(shellEscape(g.repo), shellEscape(g.path));
+            const result = await execSudo(
               client,
-              wrapSudo(args.join(" "), so),
+              args.join(" "),
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`git clone failed: ${result.stderr}`);
@@ -341,20 +350,18 @@ export const model = {
 
             if (isCommitHash(g.revision)) {
               if (g.depth) {
-                await exec(
+                await execSudo(
                   client,
-                  wrapSudo(
-                    `git -C ${JSON.stringify(g.path)} fetch --unshallow`,
-                    so,
-                  ),
+                  `git -C ${shellEscape(g.path)} fetch --unshallow`,
+                  so,
                 );
               }
-              const checkout = await exec(
+              const checkout = await execSudo(
                 client,
-                wrapSudo(
-                  `git -C ${JSON.stringify(g.path)} checkout ${g.revision}`,
-                  so,
-                ),
+                `git -C ${shellEscape(g.path)} checkout ${
+                  shellEscape(g.revision)
+                }`,
+                so,
               );
               if (checkout.exitCode !== 0) {
                 throw new Error(
@@ -364,14 +371,12 @@ export const model = {
             }
           } else {
             if (changes.some((c) => c.startsWith("origin:"))) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(
-                  `git -C ${JSON.stringify(g.path)} remote set-url origin ${
-                    JSON.stringify(g.repo)
-                  }`,
-                  so,
-                ),
+                `git -C ${shellEscape(g.path)} remote set-url origin ${
+                  shellEscape(g.repo)
+                }`,
+                so,
               );
             }
 
@@ -380,43 +385,39 @@ export const model = {
                 c.startsWith("branch:") || c.startsWith("commit:")
               )
             ) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(
-                  `git -C ${JSON.stringify(g.path)} fetch origin`,
-                  so,
-                ),
+                `git -C ${shellEscape(g.path)} fetch origin`,
+                so,
               );
 
               if (isCommitHash(g.revision)) {
-                await exec(
+                await execSudo(
                   client,
-                  wrapSudo(
-                    `git -C ${JSON.stringify(g.path)} checkout ${g.revision}`,
-                    so,
-                  ),
+                  `git -C ${shellEscape(g.path)} checkout ${
+                    shellEscape(g.revision)
+                  }`,
+                  so,
                 );
               } else {
-                const checkout = await exec(
+                const checkout = await execSudo(
                   client,
-                  wrapSudo(
-                    `git -C ${JSON.stringify(g.path)} checkout ${g.revision}`,
-                    so,
-                  ),
+                  `git -C ${shellEscape(g.path)} checkout ${
+                    shellEscape(g.revision)
+                  }`,
+                  so,
                 );
                 if (checkout.exitCode !== 0) {
                   throw new Error(
                     `git checkout failed: ${checkout.stderr}`,
                   );
                 }
-                await exec(
+                await execSudo(
                   client,
-                  wrapSudo(
-                    `git -C ${
-                      JSON.stringify(g.path)
-                    } pull origin ${g.revision}`,
-                    so,
-                  ),
+                  `git -C ${shellEscape(g.path)} pull origin ${
+                    shellEscape(g.revision)
+                  }`,
+                  so,
                 );
               }
             }
@@ -426,14 +427,10 @@ export const model = {
             g.ensure === "present" && (g.owner || g.group)
           ) {
             const ownership = g.group ? `${g.owner || ""}:${g.group}` : g.owner;
-            await exec(
+            await execSudo(
               client,
-              wrapSudo(
-                `chown -R ${JSON.stringify(ownership)} ${
-                  JSON.stringify(g.path)
-                }`,
-                so,
-              ),
+              `chown -R ${shellEscape(ownership)} ${shellEscape(g.path)}`,
+              so,
             );
           }
 

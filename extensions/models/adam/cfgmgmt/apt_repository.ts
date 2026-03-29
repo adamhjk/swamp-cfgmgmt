@@ -1,5 +1,10 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo, writeFileAs } from "./_lib/ssh.ts";
+import {
+  execSudo,
+  getConnection,
+  shellEscape,
+  writeFileAs,
+} from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   name: z.string().describe(
@@ -106,21 +111,20 @@ async function gather(client, g) {
   const so = sudoOpts(g);
   const path = repoFilePath(g);
 
-  const repoResult = await exec(
+  const repoResult = await execSudo(
     client,
-    wrapSudo(`cat ${JSON.stringify(path)} 2>/dev/null`, so),
+    `cat ${shellEscape(path)} 2>/dev/null`,
+    so,
   );
   const repoFileExists = repoResult.exitCode === 0;
   const repoContent = repoFileExists ? repoResult.stdout : null;
 
   let gpgKeyExists = false;
   if (g.signedBy) {
-    const keyResult = await exec(
+    const keyResult = await execSudo(
       client,
-      wrapSudo(
-        `test -f ${JSON.stringify(g.signedBy)} && echo Y || echo N`,
-        so,
-      ),
+      `test -f ${shellEscape(g.signedBy)} && echo Y || echo N`,
+      so,
     );
     gpgKeyExists = keyResult.stdout.trim() === "Y";
   }
@@ -168,7 +172,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -243,38 +249,34 @@ export const model = {
                 g.signedBy.lastIndexOf("/"),
               );
               if (keyDir) {
-                await exec(
+                await execSudo(
                   client,
-                  wrapSudo(`mkdir -p ${JSON.stringify(keyDir)}`, so),
+                  `mkdir -p ${shellEscape(keyDir)}`,
+                  so,
                 );
               }
 
               // Try curl, fallback to wget. Dearmor if needed.
-              const curlCheck = await exec(
+              const curlCheck = await execSudo(
                 client,
-                wrapSudo("command -v curl", so),
+                "command -v curl",
+                so,
               );
               const fetchCmd = curlCheck.exitCode === 0
-                ? `curl -fsSL ${JSON.stringify(g.gpgKeyUrl)}`
-                : `wget -qO- ${JSON.stringify(g.gpgKeyUrl)}`;
+                ? `curl -fsSL ${shellEscape(g.gpgKeyUrl)}`
+                : `wget -qO- ${shellEscape(g.gpgKeyUrl)}`;
 
-              const dlResult = await exec(
+              const dlResult = await execSudo(
                 client,
-                wrapSudo(
-                  `${fetchCmd} | gpg --dearmor -o ${
-                    JSON.stringify(g.signedBy)
-                  }`,
-                  so,
-                ),
+                `${fetchCmd} | gpg --dearmor -o ${shellEscape(g.signedBy)}`,
+                so,
               );
               if (dlResult.exitCode !== 0) {
                 // Try without dearmor (key may already be binary)
-                const dlResult2 = await exec(
+                const dlResult2 = await execSudo(
                   client,
-                  wrapSudo(
-                    `${fetchCmd} > ${JSON.stringify(g.signedBy)}`,
-                    so,
-                  ),
+                  `${fetchCmd} > ${shellEscape(g.signedBy)}`,
+                  so,
                 );
                 if (dlResult2.exitCode !== 0) {
                   throw new Error(
@@ -292,15 +294,17 @@ export const model = {
             // Remove repo file and GPG key
             const path = repoFilePath(g);
             if (current.repoFileExists) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`rm -f ${JSON.stringify(path)}`, so),
+                `rm -f ${shellEscape(path)}`,
+                so,
               );
             }
             if (g.signedBy && current.gpgKeyExists) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`rm -f ${JSON.stringify(g.signedBy)}`, so),
+                `rm -f ${shellEscape(g.signedBy)}`,
+                so,
               );
             }
           }

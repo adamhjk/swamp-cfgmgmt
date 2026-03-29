@@ -1,5 +1,5 @@
 import { z } from "npm:zod@4";
-import { exec, getConnection, wrapSudo } from "./_lib/ssh.ts";
+import { execSudo, getConnection, shellEscape } from "./_lib/ssh.ts";
 
 const GlobalArgsSchema = z.object({
   name: z.string().describe("Container name"),
@@ -55,7 +55,9 @@ const StateSchema = z.object({
     imageId: z.string().nullable().describe("Current image ID"),
     currentImage: z.string().nullable().describe("Current image name"),
     ports: z.array(z.string()).describe("Current port mappings"),
-    env: z.array(z.string()).describe("Current environment variables"),
+    env: z.array(z.string()).meta({ sensitive: true }).describe(
+      "Current environment variables",
+    ),
     volumes: z.array(z.string()).describe("Current volume mounts"),
     restartPolicy: z.string().nullable().describe("Current restart policy"),
   }).describe("Current container state"),
@@ -82,12 +84,10 @@ function connect(g) {
 async function gather(client, g) {
   const so = sudoOpts(g);
 
-  const result = await exec(
+  const result = await execSudo(
     client,
-    wrapSudo(
-      `docker inspect ${JSON.stringify(g.name)} 2>/dev/null`,
-      so,
-    ),
+    `docker inspect ${shellEscape(g.name)} 2>/dev/null`,
+    so,
   );
 
   if (result.exitCode !== 0) {
@@ -134,7 +134,13 @@ async function gather(client, g) {
     }
   }
 
-  const env = info.Config?.Env || [];
+  const allEnv: string[] = info.Config?.Env || [];
+  const requestedKeys = new Set(
+    (g.environment || []).map((e: string) => e.split("=")[0]),
+  );
+  const env = requestedKeys.size > 0
+    ? allEnv.filter((e: string) => requestedKeys.has(e.split("=")[0]))
+    : [];
   const volumes: string[] = [];
   const mounts = info.Mounts || [];
   for (const mount of mounts) {
@@ -244,20 +250,20 @@ function emptyCurrent() {
 }
 
 function buildCreateCmd(g) {
-  const args = ["docker", "create", "--name", JSON.stringify(g.name)];
+  const args = ["docker", "create", "--name", shellEscape(g.name)];
   if (g.ports) {
-    for (const p of g.ports) args.push("-p", p);
+    for (const p of g.ports) args.push("-p", shellEscape(p));
   }
   if (g.environment) {
-    for (const e of g.environment) args.push("-e", JSON.stringify(e));
+    for (const e of g.environment) args.push("-e", shellEscape(e));
   }
   if (g.volumes) {
-    for (const v of g.volumes) args.push("-v", v);
+    for (const v of g.volumes) args.push("-v", shellEscape(v));
   }
-  if (g.restart) args.push("--restart", g.restart);
-  if (g.network) args.push("--network", g.network);
-  args.push(JSON.stringify(g.image));
-  if (g.command) args.push(g.command);
+  if (g.restart) args.push("--restart", shellEscape(g.restart));
+  if (g.network) args.push("--network", shellEscape(g.network));
+  args.push(shellEscape(g.image));
+  if (g.command) args.push(shellEscape(g.command));
   return args.join(" ");
 }
 
@@ -274,7 +280,9 @@ export const model = {
     nodeIdentityFile: z.string().optional().describe("Path to SSH private key"),
     become: z.boolean().optional().describe("Enable sudo privilege escalation"),
     becomeUser: z.string().optional().describe("User to become via sudo"),
-    becomePassword: z.string().optional().describe("Password for sudo -S"),
+    becomePassword: z.string().optional().meta({ sensitive: true }).describe(
+      "Password for sudo -S",
+    ),
   }),
   resources: {
     state: {
@@ -351,35 +359,40 @@ export const model = {
 
           if (g.ensure === "absent") {
             if (current.containerExists) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`docker rm -f ${JSON.stringify(g.name)}`, so),
+                `docker rm -f ${shellEscape(g.name)}`,
+                so,
               );
             }
           } else if (changes.includes("recreate container")) {
             if (current.containerStatus === "running") {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`docker stop ${JSON.stringify(g.name)}`, so),
+                `docker stop ${shellEscape(g.name)}`,
+                so,
               );
             }
             if (current.containerExists) {
-              await exec(
+              await execSudo(
                 client,
-                wrapSudo(`docker rm ${JSON.stringify(g.name)}`, so),
+                `docker rm ${shellEscape(g.name)}`,
+                so,
               );
             }
-            const createResult = await exec(
+            const createResult = await execSudo(
               client,
-              wrapSudo(buildCreateCmd(g), so),
+              buildCreateCmd(g),
+              so,
             );
             if (createResult.exitCode !== 0) {
               throw new Error(`docker create failed: ${createResult.stderr}`);
             }
             if (g.ensure === "running") {
-              const startResult = await exec(
+              const startResult = await execSudo(
                 client,
-                wrapSudo(`docker start ${JSON.stringify(g.name)}`, so),
+                `docker start ${shellEscape(g.name)}`,
+                so,
               );
               if (startResult.exitCode !== 0) {
                 throw new Error(
@@ -388,17 +401,19 @@ export const model = {
               }
             }
           } else if (changes.includes("create container")) {
-            const createResult = await exec(
+            const createResult = await execSudo(
               client,
-              wrapSudo(buildCreateCmd(g), so),
+              buildCreateCmd(g),
+              so,
             );
             if (createResult.exitCode !== 0) {
               throw new Error(`docker create failed: ${createResult.stderr}`);
             }
             if (changes.includes("start container")) {
-              const startResult = await exec(
+              const startResult = await execSudo(
                 client,
-                wrapSudo(`docker start ${JSON.stringify(g.name)}`, so),
+                `docker start ${shellEscape(g.name)}`,
+                so,
               );
               if (startResult.exitCode !== 0) {
                 throw new Error(
@@ -407,17 +422,19 @@ export const model = {
               }
             }
           } else if (changes.includes("start container")) {
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(`docker start ${JSON.stringify(g.name)}`, so),
+              `docker start ${shellEscape(g.name)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`docker start failed: ${result.stderr}`);
             }
           } else if (changes.includes("stop container")) {
-            const result = await exec(
+            const result = await execSudo(
               client,
-              wrapSudo(`docker stop ${JSON.stringify(g.name)}`, so),
+              `docker stop ${shellEscape(g.name)}`,
+              so,
             );
             if (result.exitCode !== 0) {
               throw new Error(`docker stop failed: ${result.stderr}`);
@@ -460,12 +477,10 @@ export const model = {
         const g = context.globalArgs;
         try {
           const client = await connect(g);
-          const result = await exec(
+          const result = await execSudo(
             client,
-            wrapSudo(
-              `docker logs --tail ${args.lines} ${JSON.stringify(g.name)} 2>&1`,
-              sudoOpts(g),
-            ),
+            `docker logs --tail ${args.lines} ${shellEscape(g.name)} 2>&1`,
+            sudoOpts(g),
           );
           const handle = await context.writeResource("logs", g.nodeHost, {
             name: g.name,
@@ -490,12 +505,10 @@ export const model = {
         const g = context.globalArgs;
         try {
           const client = await connect(g);
-          const result = await exec(
+          const result = await execSudo(
             client,
-            wrapSudo(
-              `docker restart ${JSON.stringify(g.name)}`,
-              sudoOpts(g),
-            ),
+            `docker restart ${shellEscape(g.name)}`,
+            sudoOpts(g),
           );
           const current = await gather(client, g);
           const failed = result.exitCode !== 0;
