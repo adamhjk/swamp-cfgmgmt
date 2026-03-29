@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: "@adam/cfgmgmt"
-version: "2026.03.27.1"
+version: "2026.03.28.1"
 description: |
   SSH-based configuration management for Linux and macOS.
 
