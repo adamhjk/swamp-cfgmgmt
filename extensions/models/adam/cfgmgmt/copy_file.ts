@@ -129,13 +129,7 @@ async function computeLocalHash(filePath) {
 
 function resolveSource(source, repoDir) {
   if (isAbsolute(source)) return source;
-  const resolved = join(repoDir, source);
-  if (!resolved.startsWith(repoDir)) {
-    throw new Error(
-      `Path traversal detected: source resolves to ${resolved} which is outside ${repoDir}`,
-    );
-  }
-  return resolved;
+  return join(repoDir, source);
 }
 
 function detectChanges(g, current) {
